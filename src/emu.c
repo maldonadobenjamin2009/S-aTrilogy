@@ -79,7 +79,10 @@ Emu* emu_open(const char* rom_path, const char* save_path, const char* bios_path
 	mCoreConfigSetDefaultIntValue(&core->config, "useBios", (bios_path && bios_path[0]) ? 1 : 0);
 	mCoreConfigSetDefaultIntValue(&core->config, "skipBios", 1);
 	mCoreConfigSetDefaultIntValue(&core->config, "idleOptimization", 1);
-	core->loadConfig(core, &core->config);
+	/* Sin esto el volumen maestro de mGBA queda en 0 y el audio sale en silencio. 0x100 = GBA_AUDIO_VOLUME_MAX */
+	mCoreConfigSetDefaultIntValue(&core->config, "volume", 0x100);
+	mCoreConfigSetDefaultIntValue(&core->config, "mute", 0);
+	mCoreLoadForeignConfig(core, &core->config);   /* rellena core->opts (volumen, BIOS...) y llama a loadConfig */
 
 	if (!core->loadROM(core, rom)) {
 		rom->close(rom);
