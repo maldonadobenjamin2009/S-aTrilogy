@@ -96,7 +96,7 @@ static int map_key(SDL_Keycode k) {
 	return (int) k;
 }
 
-static void send(App* app, int type, int code, int value) { AppEvent e = {type, code, value}; app_event(app, &e); }
+static void post_event(App* app, int type, int code, int value) { AppEvent e = {type, code, value}; app_event(app, &e); }
 
 static void mouse_to_ui(int wx, int wy, int* ux, int* uy) {
 	int ow, oh, ww, wh;
@@ -113,17 +113,17 @@ static void pump_events(App* app) {
 	SDL_Event e;
 	while (SDL_PollEvent(&e)) {
 		switch (e.type) {
-		case SDL_QUIT: send(app, EV_QUIT, 0, 0); break;
-		case SDL_KEYDOWN: if (!e.key.repeat) send(app, EV_KEY_DOWN, map_key(e.key.keysym.sym), (e.key.keysym.mod & KMOD_ALT) ? 1 : 0); break;
-		case SDL_KEYUP: send(app, EV_KEY_UP, map_key(e.key.keysym.sym), 0); break;
+		case SDL_QUIT: post_event(app, EV_QUIT, 0, 0); break;
+		case SDL_KEYDOWN: if (!e.key.repeat) post_event(app, EV_KEY_DOWN, map_key(e.key.keysym.sym), (e.key.keysym.mod & KMOD_ALT) ? 1 : 0); break;
+		case SDL_KEYUP: post_event(app, EV_KEY_UP, map_key(e.key.keysym.sym), 0); break;
 		case SDL_CONTROLLERDEVICEADDED: open_pad(e.cdevice.which); break;
 		case SDL_CONTROLLERDEVICEREMOVED: close_pad(e.cdevice.which); break;
-		case SDL_CONTROLLERBUTTONDOWN: send(app, EV_PAD_DOWN, e.cbutton.button, 0); break;
-		case SDL_CONTROLLERBUTTONUP: send(app, EV_PAD_UP, e.cbutton.button, 0); break;
-		case SDL_CONTROLLERAXISMOTION: send(app, EV_PAD_AXIS, e.caxis.axis, e.caxis.value); break;
-		case SDL_WINDOWEVENT: if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) send(app, EV_FOCUS_LOST, 0, 0); break;
-		case SDL_MOUSEMOTION: { int x, y; mouse_to_ui(e.motion.x, e.motion.y, &x, &y); send(app, EV_MOUSE_MOVE, x, y); break; }
-		case SDL_MOUSEBUTTONDOWN: if (e.button.button == SDL_BUTTON_LEFT) { int x, y; mouse_to_ui(e.button.x, e.button.y, &x, &y); send(app, EV_MOUSE_DOWN, x, y); } break;
+		case SDL_CONTROLLERBUTTONDOWN: post_event(app, EV_PAD_DOWN, e.cbutton.button, 0); break;
+		case SDL_CONTROLLERBUTTONUP: post_event(app, EV_PAD_UP, e.cbutton.button, 0); break;
+		case SDL_CONTROLLERAXISMOTION: post_event(app, EV_PAD_AXIS, e.caxis.axis, e.caxis.value); break;
+		case SDL_WINDOWEVENT: if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) post_event(app, EV_FOCUS_LOST, 0, 0); break;
+		case SDL_MOUSEMOTION: { int x, y; mouse_to_ui(e.motion.x, e.motion.y, &x, &y); post_event(app, EV_MOUSE_MOVE, x, y); break; }
+		case SDL_MOUSEBUTTONDOWN: if (e.button.button == SDL_BUTTON_LEFT) { int x, y; mouse_to_ui(e.button.x, e.button.y, &x, &y); post_event(app, EV_MOUSE_DOWN, x, y); } break;
 		default: break;
 		}
 	}
