@@ -1,0 +1,49 @@
+# Compila el launcher en Windows, Linux y macOS y publica un .zip por sistema (pestaña "Actions" > artefactos).
+# No hace falta instalar nada en tu PC: sube el proyecto a GitHub y descarga el resultado.
+name: build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  linux:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libsdl2-dev cmake ninja-build
+      - run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build --prefix pkg/SonicAdvanceTrilogy
+      - uses: actions/upload-artifact@v4
+        with: { name: SonicAdvanceTrilogy-linux, path: pkg }
+
+  windows:
+    runs-on: windows-latest
+    defaults: { run: { shell: 'msys2 {0}' } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-cmake mingw-w64-x86_64-ninja mingw-w64-x86_64-SDL2
+      - run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build --prefix pkg/SonicAdvanceTrilogy
+      - uses: actions/upload-artifact@v4
+        with: { name: SonicAdvanceTrilogy-windows, path: pkg }
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: brew install sdl2 cmake ninja
+      - run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=ON
+      - run: cmake --build build
+      - run: ctest --test-dir build --output-on-failure
+      - run: cmake --install build --prefix pkg/SonicAdvanceTrilogy
+      - uses: actions/upload-artifact@v4
+        with: { name: SonicAdvanceTrilogy-macos, path: pkg }

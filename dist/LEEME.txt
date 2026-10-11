@@ -1,0 +1,34 @@
+SONIC ADVANCE TRILOGY - LAUNCHER (v2, un solo ejecutable)
+=========================================================
+
+El emulador (mGBA) viene DENTRO del ejecutable: no hay que instalar ni compilar nada más.
+
+1) Pon tus ROMs en main/roms (nombres en main/roms/NOMBRES_DE_LAS_ROMS.txt).
+2) (Opcional) Pon tus imágenes en assets/ (ver assets/LEEME_IMAGENES.txt).
+3) Ejecuta SonicAdvanceTrilogy.
+
+CONTROLES POR DEFECTO (se cambian en Ajustes > Controles o Pausa > Controles)
+   Acción            Teclado          Mando PS4
+   Botón A           X                Círculo
+   Botón B           Z                Cruz
+   L / R             A / S            L1 / R1
+   Start / Select    Enter / Retroc.  Options / Share
+   Cruceta           Flechas          Cruceta o stick izquierdo
+   PAUSA             Esc              Botón PS
+   Acelerar x4       Tab (mantener)   R2 (mantener)
+   Guardado/Carga rápida   F5 / F8    (sin asignar)
+   Pantalla completa F11 o Alt+Enter
+   Si el botón PS no responde en tu sistema, reasígnalo en Controles.
+   Menús: flechas/cruceta, Enter/Cruz = aceptar, Esc/Círculo = volver, Supr/Cuadrado = borrar. También ratón.
+
+MENÚ DE PAUSA (estilo Sonic Mania)
+   Continuar · Guardar partida · Cargar partida · Volumen · Pantalla completa · Controles · Reiniciar · Salir
+   Guardar/Cargar: 8 ranuras por juego con miniatura y fecha (Supr/Cuadrado dos veces = borrar).
+   El juego se pausa solo si la ventana pierde el foco. La partida de batería (.sav) se guarda sola.
+
+CARPETAS
+   main/roms    tus ROMs          main/saves   partidas y estados (.sav, .ss1-.ss8)
+   main/bios    (opcional) gba_bios.bin        main/config.txt  ajustes y controles
+
+Licencias: mGBA (MPL 2.0) y tipografía DejaVu, en la carpeta "licencias".
+Este programa no incluye ROMs ni material con copyright de Sega. Sonic y Sonic Advance son marcas de SEGA.
