@@ -17,6 +17,9 @@
 #include <fcntl.h>
 
 #include "emu.h"
+#ifndef EMU_INTERP
+#define EMU_INTERP mINTERPOLATOR_SINC   /* igual que el frontend SDL oficial de mGBA */
+#endif
 #define VIDEO_W EMU_W
 #define VIDEO_H EMU_H
 
@@ -71,7 +74,7 @@ Emu* emu_open(const char* rom_path, const char* save_path, const char* bios_path
 	core->setAudioBufferSize(core, 2048);
 	emu->srcRate = core->audioSampleRate(core);
 	mAudioBufferInit(&emu->out, 8192, 2);
-	mAudioResamplerInit(&emu->resampler, mINTERPOLATOR_COSINE);
+	mAudioResamplerInit(&emu->resampler, EMU_INTERP);
 	mAudioResamplerSetDestination(&emu->resampler, &emu->out, out_rate);
 	mAudioResamplerSetSource(&emu->resampler, core->getAudioBuffer(core), emu->srcRate, true);
 	emu->audioReady = 1;

@@ -714,6 +714,8 @@ int app_take_audio(App* a, const int16_t** data) {
 	return n;
 }
 int app_audio_reset_requested(App* a) { int r = a->audio_reset; a->audio_reset = 0; return r; }
+int app_game_running(const App* a) { return a->state == ST_GAME && a->emu != NULL; }
+int app_turbo(const App* a) { return a->turbo; }
 int app_debug_state(const App* a) { return (int) a->state; }
 
 /* ---------------------------------------------------------------- crear / destruir */

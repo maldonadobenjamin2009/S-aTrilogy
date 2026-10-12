@@ -55,6 +55,8 @@ void app_render(App* a, AppFrame* out);
 double app_frame_time(const App* a);                /* segundos que debe durar cada fotograma */
 int app_take_audio(App* a, const int16_t** data);   /* fotogramas estéreo pendientes (ya con volumen) */
 int app_audio_reset_requested(App* a);              /* 1 una vez tras pausar/reanudar/cargar */
+int app_game_running(const App* a);                 /* 1 mientras el juego corre (no en pausa ni menús) */
+int app_turbo(const App* a);                        /* 1 si se está acelerando (sin audio) */
 
 /* Para pruebas */
 int app_debug_state(const App* a);

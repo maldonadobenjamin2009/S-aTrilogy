@@ -43,6 +43,36 @@ static void h_title(void* u, const char* t) { (void) u; SDL_SetWindowTitle(P.win
 static void h_cursor(void* u, int v) { (void) u; SDL_ShowCursor(v ? SDL_ENABLE : SDL_DISABLE); }
 static const char* h_key_name(void* u, int code) { (void) u; return SDL_GetKeyName((SDL_Keycode) code); }
 
+/* ------------------------------------------------------------------------- audio
+ * Igual que el frontend SDL oficial de mGBA:
+ *  - en Windows se prefiere DirectSound (el WASAPI de SDL daba latencia y cortes; ver CHANGES de mGBA),
+ *  - se permite que el dispositivo cambie la frecuencia (usamos la que nos dé como frecuencia de salida),
+ *  - el AUDIO marca el ritmo del emulador ("audioSync"): solo se emulan fotogramas mientras la cola de
+ *    audio esté por debajo del objetivo. Así no hay latencia acumulada ni cortes por desajuste de relojes. */
+#define AUDIO_DEVICE_SAMPLES 512      /* buffer del dispositivo (~10 ms a 48 kHz) */
+#define AUDIO_TARGET_MS 40            /* cola de audio objetivo */
+#define AUDIO_MAX_MS 250              /* si se pasa de esto (p. ej. tras arrastrar la ventana) se vacía */
+
+static SDL_AudioDeviceID open_audio(SDL_AudioSpec* have) {
+	SDL_AudioSpec want;
+	SDL_zero(want);
+	want.freq = 48000; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = AUDIO_DEVICE_SAMPLES;
+	const char* drivers[3];
+	int n = 0;
+#if defined(_WIN32)
+	if (!SDL_getenv("SDL_AUDIODRIVER")) { drivers[n++] = "directsound"; drivers[n++] = "wasapi"; }
+#endif
+	drivers[n++] = NULL;
+	for (int i = 0; i < n; i++) {
+		SDL_setenv("SDL_AUDIODRIVER", drivers[i] ? drivers[i] : "", 1);
+		if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) continue;
+		SDL_AudioDeviceID d = SDL_OpenAudioDevice(NULL, 0, &want, have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+		if (d) return d;
+		SDL_QuitSubSystem(SDL_INIT_AUDIO);
+	}
+	return 0;
+}
+
 /* -------------------------------------------------------------------------- vídeo */
 static SDL_Texture* make_tex(int fmt, int w, int h, int linear, SDL_BlendMode bm) {
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, linear ? "1" : "0");
@@ -133,7 +163,7 @@ static void pump_events(App* app) {
 int main(int argc, char** argv) {
 	(void) argc; (void) argv;
 	SDL_SetMainReady();
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_GAMECONTROLLER) != 0) {
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
 		fprintf(stderr, "No se pudo iniciar SDL: %s\n", SDL_GetError());
 		return 1;
 	}
@@ -171,13 +201,14 @@ int main(int argc, char** argv) {
 	/* audio */
 	AppHost host;
 	memset(&host, 0, sizeof(host));
-	SDL_AudioSpec want, have;
-	SDL_zero(want);
-	want.freq = 48000; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024;
-	P.audio = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+	SDL_AudioSpec have;
+	SDL_zero(have);
+	P.audio = open_audio(&have);
 	host.audio_rate = P.audio ? have.freq : 48000;
 	host.has_audio = P.audio != 0;
 	if (P.audio) SDL_PauseAudioDevice(P.audio, 0);
+	const Uint32 bytes_per_ms = (Uint32) host.audio_rate * 4 / 1000;
+	const Uint32 target_bytes = bytes_per_ms * AUDIO_TARGET_MS, max_bytes = bytes_per_ms * AUDIO_MAX_MS;
 
 	host.open_folder = h_open_folder; host.set_fullscreen = h_fullscreen; host.set_title = h_title;
 	host.set_cursor_visible = h_cursor; host.key_name = h_key_name;
@@ -189,8 +220,19 @@ int main(int argc, char** argv) {
 	const double freq = (double) SDL_GetPerformanceFrequency();
 	double last = SDL_GetPerformanceCounter() / freq, next = last;
 	AppFrame frame;
+	int was_clocked = 0;
 	for (;;) {
 		pump_events(app);
+
+		/* Sincronización por audio: solo se avanza un fotograma cuando la cola está por debajo del objetivo. */
+		int clocked = P.audio && app_game_running(app) && !app_turbo(app);
+		if (clocked) {
+			Uint32 queued = SDL_GetQueuedAudioSize(P.audio);
+			if (queued > max_bytes) SDL_ClearQueuedAudio(P.audio);
+			else if (queued >= target_bytes) { SDL_Delay(1); continue; }
+		}
+		if (clocked != was_clocked) { was_clocked = clocked; next = SDL_GetPerformanceCounter() / freq; }
+
 		double now = SDL_GetPerformanceCounter() / freq;
 		double dt = now - last;
 		last = now;
@@ -201,17 +243,18 @@ int main(int argc, char** argv) {
 
 		if (P.audio) {
 			const int16_t* data;
-			int n = app_take_audio(app, &data);
 			if (app_audio_reset_requested(app)) SDL_ClearQueuedAudio(P.audio);
-			if (n > 0 && SDL_GetQueuedAudioSize(P.audio) < (Uint32) (host.audio_rate / 7 * 4))   /* máx. ~140 ms en cola */
-				SDL_QueueAudio(P.audio, data, (Uint32) n * 4);
+			int n = app_take_audio(app, &data);
+			if (n > 0) SDL_QueueAudio(P.audio, data, (Uint32) n * 4);
 		}
 
-		next += app_frame_time(app);
-		double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
-		if (delay > 0.002) SDL_Delay((Uint32) ((delay - 0.001) * 1000.0));
-		if (delay > -0.25) { while (SDL_GetPerformanceCounter() / freq < next) { } }
-		else next = SDL_GetPerformanceCounter() / freq;
+		if (!clocked) {                       /* menús y aceleración: ritmo por reloj */
+			next += app_frame_time(app);
+			double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
+			if (delay > 0.002) SDL_Delay((Uint32) ((delay - 0.001) * 1000.0));
+			if (delay > -0.25) { while (SDL_GetPerformanceCounter() / freq < next) { } }
+			else next = SDL_GetPerformanceCounter() / freq;
+		}
 	}
 
 	app_destroy(app);
