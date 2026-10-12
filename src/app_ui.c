@@ -354,6 +354,10 @@ static void draw_settings(App* a, Canvas* c) {
 	char buf[96];
 	snprintf(buf, sizeof(buf), "Motor: mGBA integrado (%s)", emu_version());
 	T(c, buf, p.x + 50, p.y + p.h - 120, 22, C_GREEN, TX_VMID);
+	snprintf(buf, sizeof(buf), "Audio: %s", a->host.audio_info && a->host.audio_info[0] ? a->host.audio_info : (a->host.has_audio ? "activo" : "sin dispositivo"));
+	T(c, buf, p.x + 50, p.y + p.h - 92, 22, a->host.has_audio ? C_GREEN : C_RED, TX_VMID);
+	snprintf(buf, sizeof(buf), "Vídeo: %s", a->host.video_info && a->host.video_info[0] ? a->host.video_info : "?");
+	T(c, buf, p.x + 50, p.y + p.h - 64, 22, C_GREEN, TX_VMID);
 	Hint h[3] = {{GL_DPAD, "↑ ↓", "Mover"}, {GL_CROSS, "Enter", "Cambiar"}, {GL_CIRCLE, "Esc", "Volver"}};
 	draw_hints(a, c, h, 3, p.x + p.w - 30, p.y + p.h - 50);
 }
@@ -493,29 +497,43 @@ static void draw_slots(App* a, Canvas* c) {
 }
 
 /* ------------------------------------------------------------- HUD durante el juego */
-static void draw_hud(App* a, Canvas* c) {
-	int y = 22;
+static void shadow_text(Canvas* c, const char* s, int x, int y, int size, uint32_t col) {
+	T(c, s, x + 2, y + 2, size, ARGB(200, 0, 0, 0), TX_BOLD);
+	T(c, s, x, y, size, col, TX_BOLD);
+}
+
+/* FPS / turbo: se dibuja en un lienzo pequeño (HUD_FPS_W x HUD_FPS_H) */
+static int draw_hud_fps(App* a, Canvas* c) {
+	int y = 4, any = 0;
+	cv_clear(c, 0);
 	if (a->cfg.show_fps) {
-		char b[32];
+		char b[96];
 		snprintf(b, sizeof(b), "FPS %.0f", a->fps);
-		T(c, b, 34, y + 2, 30, ARGB(200, 0, 0, 0), TX_BOLD);
-		T(c, b, 32, y, 30, C_WHITE, TX_BOLD);
-		y += 38;
+		shadow_text(c, b, 6, y, 30, C_WHITE);
+		snprintf(b, sizeof(b), "emu %.1f ms  pantalla %.1f ms", a->perf_update, a->perf_present);
+		shadow_text(c, b, 6, y + 36, 20, C_SOFT);
+		y += 64;
+		any = 1;
 	}
 	if (a->turbo && a->state == ST_GAME) {
 		char b[16];
 		snprintf(b, sizeof(b), ">> x%d", TURBO_FRAMES);
-		T(c, b, 34, y + 2, 30, ARGB(200, 0, 0, 0), TX_BOLD);
-		T(c, b, 32, y, 30, C_GOLD, TX_BOLD);
+		shadow_text(c, b, 6, y, 30, C_GOLD);
+		any = 1;
 	}
+	return any;
 }
 
-static void draw_toast(App* a, Canvas* c, int y) {
-	if (!a->toast[0] || a->now >= a->toast_until) return;
+static int toast_active(const App* a) { return a->toast[0] && a->now < a->toast_until; }
+
+static void draw_toast_at(App* a, Canvas* c, int cx, int cy) {
 	int w = gfx_text_width(a->toast, 26, 0) + 70;
-	Rect r = rect_make(UI_W / 2 - w / 2, y - 27, w, 54);
+	Rect r = rect_make(cx - w / 2, cy - 27, w, 54);
 	panel(c, r, ARGB(235, 20, 22, 34), 27, ARGB(80, 255, 255, 255), 2);
-	T(c, a->toast, UI_W / 2, y, 26, C_WHITE, TX_CENTER | TX_VMID);
+	T(c, a->toast, cx, cy, 26, C_WHITE, TX_CENTER | TX_VMID);
+}
+static void draw_toast(App* a, Canvas* c, int y) {
+	if (toast_active(a)) draw_toast_at(a, c, UI_W / 2, y);
 }
 
 /* ---------------------------------------------------------------- composición */
@@ -554,13 +572,14 @@ void app_render(App* a, AppFrame* out) {
 	out->smooth = a->cfg.smooth;
 	out->integer_scale = a->cfg.integer_scale;
 	Canvas* c = a->ui;
-	int toast_on = a->toast[0] && a->now < a->toast_until;
 	if (a->state == ST_GAME) {
-		if (!(a->cfg.show_fps || a->turbo || toast_on)) { out->ui = NULL; return; }
-		cv_clear(c, 0);
-		draw_hud(a, c);
-		draw_toast(a, c, 1020);
-		out->ui = c;
+		out->ui = NULL;
+		if (draw_hud_fps(a, a->hud_fps)) { out->hud[0].cv = a->hud_fps; out->hud[0].x = HUD_FPS_X; out->hud[0].y = HUD_FPS_Y; }
+		if (toast_active(a)) {
+			cv_clear(a->hud_toast, 0);
+			draw_toast_at(a, a->hud_toast, HUD_TOAST_W / 2, HUD_TOAST_H / 2);
+			out->hud[1].cv = a->hud_toast; out->hud[1].x = HUD_TOAST_X; out->hud[1].y = HUD_TOAST_Y;
+		}
 		return;
 	}
 	cv_clear(c, 0);

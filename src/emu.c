@@ -151,6 +151,10 @@ int emu_read_audio(Emu* emu, int16_t* dst, int max_frames) {
 	return (int) mAudioBufferRead(&emu->out, dst, (size_t) max_frames);
 }
 
+void emu_set_audio_rate(Emu* emu, double rate) {
+	mAudioResamplerSetDestination(&emu->resampler, &emu->out, rate);
+}
+
 void emu_clear_audio(Emu* emu) {
 	mAudioBufferClear(&emu->out);
 	mAudioBufferClear(emu->core->getAudioBuffer(emu->core));

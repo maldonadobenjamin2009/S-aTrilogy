@@ -18,6 +18,7 @@ void emu_run_frame(Emu* e);
 const uint32_t* emu_video(Emu* e);                    /* 240x160, bytes R,G,B,X (uint32 0xXXBBGGRR) */
 int emu_read_audio(Emu* e, int16_t* dst, int max_frames);   /* muestras estéreo ya remuestreadas */
 void emu_clear_audio(Emu* e);
+void emu_set_audio_rate(Emu* e, double rate);         /* cambia la frecuencia de salida al vuelo (control dinámico) */
 int emu_save_state(Emu* e, const char* path);
 int emu_load_state(Emu* e, const char* path);
 

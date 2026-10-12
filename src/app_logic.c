@@ -261,6 +261,7 @@ static void start_game(App* a, int i) {
 		return;
 	}
 	a->game_idx = i;
+	a->audio_ratio = 1.0;
 	a->have_frame = 0;
 	a->audio_frames = 0;
 	a->last_slot = 1;
@@ -714,8 +715,20 @@ int app_take_audio(App* a, const int16_t** data) {
 	return n;
 }
 int app_audio_reset_requested(App* a) { int r = a->audio_reset; a->audio_reset = 0; return r; }
-int app_game_running(const App* a) { return a->state == ST_GAME && a->emu != NULL; }
-int app_turbo(const App* a) { return a->turbo; }
+void app_perf_report(App* a, double update_ms, double present_ms) {
+	a->perf_update += (update_ms - a->perf_update) * 0.1;      /* media suavizada */
+	a->perf_present += (present_ms - a->perf_present) * 0.1;
+}
+
+void app_audio_feedback(App* a, int queued_frames) {
+	if (!a->emu || a->state != ST_GAME || a->host.audio_rate <= 0) return;
+	double target = a->host.audio_rate * 0.040;                       /* ~40 ms de cola */
+	double err = (target - queued_frames) / target;                   /* >0: falta audio, <0: sobra */
+	err = err < -1.0 ? -1.0 : (err > 1.0 ? 1.0 : err);
+	double want = 1.0 + 0.01 * err;                                   /* máx. ±1 % */
+	a->audio_ratio += (want - a->audio_ratio) * 0.1;                  /* suavizado: sin saltos de tono */
+	emu_set_audio_rate(a->emu, a->host.audio_rate * a->audio_ratio);
+}
 int app_debug_state(const App* a) { return (int) a->state; }
 
 /* ---------------------------------------------------------------- crear / destruir */
@@ -749,6 +762,8 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	for (int i = 0; i < NUM_GAMES; i++) a->anim[i] = i == 0 ? 1.0f : 0.0f;
 	app_scan_roms(a);
 	a->ui = cv_new(UI_W, UI_H);
+	a->hud_fps = cv_new(HUD_FPS_W, HUD_FPS_H);
+	a->hud_toast = cv_new(HUD_TOAST_W, HUD_TOAST_H);
 	ui_load_assets(a);
 	if (a->cfg.fullscreen && a->host.set_fullscreen) a->host.set_fullscreen(a->host.user, 1);
 	return a;
@@ -760,5 +775,7 @@ void app_destroy(App* a) {
 	for (int n = 1; n <= SLOT_COUNT; n++) cv_free(a->slot_thumbs[n]);
 	ui_free_assets(a);
 	cv_free(a->ui);
+	cv_free(a->hud_fps);
+	cv_free(a->hud_toast);
 	free(a);
 }

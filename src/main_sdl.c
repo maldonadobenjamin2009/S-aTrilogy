@@ -19,7 +19,7 @@
 typedef struct {
 	SDL_Window* win;
 	SDL_Renderer* ren;
-	SDL_Texture *tex_ui, *tex_game_sharp, *tex_game_smooth;
+	SDL_Texture *tex_ui, *tex_game_sharp, *tex_game_smooth, *tex_hud[2];
 	SDL_AudioDeviceID audio;
 	SDL_GameController* pads[16];
 	int fullscreen;
@@ -47,10 +47,10 @@ static const char* h_key_name(void* u, int code) { (void) u; return SDL_GetKeyNa
  * Igual que el frontend SDL oficial de mGBA:
  *  - en Windows se prefiere DirectSound (el WASAPI de SDL daba latencia y cortes; ver CHANGES de mGBA),
  *  - se permite que el dispositivo cambie la frecuencia (usamos la que nos dé como frecuencia de salida),
- *  - el AUDIO marca el ritmo del emulador ("audioSync"): solo se emulan fotogramas mientras la cola de
- *    audio esté por debajo del objetivo. Así no hay latencia acumulada ni cortes por desajuste de relojes. */
+ *  - el ritmo del juego lo marca SIEMPRE el reloj (59,7275 fps); la tasa del audio se corrige ±1 % según la
+ *    cola (control dinámico, app_audio_feedback) para que no haya retraso acumulado ni cortes. Si el dispositivo
+ *    de audio consumiera a otra velocidad, el juego NO se ralentiza. */
 #define AUDIO_DEVICE_SAMPLES 512      /* buffer del dispositivo (~10 ms a 48 kHz) */
-#define AUDIO_TARGET_MS 40            /* cola de audio objetivo */
 #define AUDIO_MAX_MS 250              /* si se pasa de esto (p. ej. tras arrastrar la ventana) se vacía */
 
 static SDL_AudioDeviceID open_audio(SDL_AudioSpec* have) {
@@ -67,6 +67,10 @@ static SDL_AudioDeviceID open_audio(SDL_AudioSpec* have) {
 		SDL_setenv("SDL_AUDIODRIVER", drivers[i] ? drivers[i] : "", 1);
 		if (SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) continue;
 		SDL_AudioDeviceID d = SDL_OpenAudioDevice(NULL, 0, &want, have, SDL_AUDIO_ALLOW_FREQUENCY_CHANGE);
+		if (d && (have->channels != 2 || have->format != AUDIO_S16SYS)) {   /* que SDL convierta: necesitamos s16 estéreo */
+			SDL_CloseAudioDevice(d);
+			d = SDL_OpenAudioDevice(NULL, 0, &want, have, 0);
+		}
 		if (d) return d;
 		SDL_QuitSubSystem(SDL_INIT_AUDIO);
 	}
@@ -102,11 +106,19 @@ static void present(const AppFrame* f) {
 		d.x = (ow - d.w) / 2; d.y = (oh - d.h) / 2;
 		SDL_RenderCopy(P.ren, t, NULL, &d);
 	}
+	SDL_Rect ud;
+	ui_dest(ow, oh, &ud);
 	if (f->ui) {
 		SDL_UpdateTexture(P.tex_ui, NULL, f->ui->px, UI_W * 4);
-		SDL_Rect d;
-		ui_dest(ow, oh, &d);
-		SDL_RenderCopy(P.ren, P.tex_ui, NULL, &d);
+		SDL_RenderCopy(P.ren, P.tex_ui, NULL, &ud);
+	}
+	for (int i = 0; i < 2; i++) {          /* indicadores pequeños: solo se sube su pequeño lienzo */
+		const HudItem* h = &f->hud[i];
+		if (!h->cv) continue;
+		float s = (float) ud.w / UI_W;
+		SDL_Rect d = {ud.x + (int) (h->x * s), ud.y + (int) (h->y * s), (int) (h->cv->w * s), (int) (h->cv->h * s)};
+		SDL_UpdateTexture(P.tex_hud[i], NULL, h->cv->px, h->cv->w * 4);
+		SDL_RenderCopy(P.ren, P.tex_hud[i], NULL, &d);
 	}
 	SDL_RenderPresent(P.ren);
 }
@@ -178,13 +190,23 @@ int main(int argc, char** argv) {
 
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy Launcher", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 	if (!P.win) { fprintf(stderr, "No se pudo crear la ventana: %s\n", SDL_GetError()); return 1; }
+	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");     /* el ritmo lo marca el propio launcher */
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
 	if (!P.ren) P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE);
 	if (!P.ren) { fprintf(stderr, "No se pudo crear el renderizador: %s\n", SDL_GetError()); return 1; }
 	P.tex_ui = make_tex(SDL_PIXELFORMAT_ARGB8888, UI_W, UI_H, 1, SDL_BLENDMODE_BLEND);
 	P.tex_game_sharp = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 0, SDL_BLENDMODE_NONE);
 	P.tex_game_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
-	if (!P.tex_ui || !P.tex_game_sharp || !P.tex_game_smooth) { fprintf(stderr, "No se pudieron crear las texturas: %s\n", SDL_GetError()); return 1; }
+	P.tex_hud[0] = make_tex(SDL_PIXELFORMAT_ARGB8888, HUD_FPS_W, HUD_FPS_H, 1, SDL_BLENDMODE_BLEND);
+	P.tex_hud[1] = make_tex(SDL_PIXELFORMAT_ARGB8888, HUD_TOAST_W, HUD_TOAST_H, 1, SDL_BLENDMODE_BLEND);
+	if (!P.tex_ui || !P.tex_game_sharp || !P.tex_game_smooth || !P.tex_hud[0] || !P.tex_hud[1]) { fprintf(stderr, "No se pudieron crear las texturas: %s\n", SDL_GetError()); return 1; }
+
+	static char video_info[160];
+	{
+		SDL_RendererInfo ri;
+		if (SDL_GetRendererInfo(P.ren, &ri) == 0)
+			snprintf(video_info, sizeof(video_info), "%s (%s)", ri.name, (ri.flags & SDL_RENDERER_ACCELERATED) ? "acelerado" : "POR SOFTWARE: lento");
+	}
 
 	/* icono de la ventana (assets/icon.png) */
 	{
@@ -206,10 +228,16 @@ int main(int argc, char** argv) {
 	P.audio = open_audio(&have);
 	host.audio_rate = P.audio ? have.freq : 48000;
 	host.has_audio = P.audio != 0;
-	if (P.audio) SDL_PauseAudioDevice(P.audio, 0);
-	const Uint32 bytes_per_ms = (Uint32) host.audio_rate * 4 / 1000;
-	const Uint32 target_bytes = bytes_per_ms * AUDIO_TARGET_MS, max_bytes = bytes_per_ms * AUDIO_MAX_MS;
+	static char audio_info[160];
+	if (P.audio) {
+		const char* drv = SDL_GetCurrentAudioDriver();
+		snprintf(audio_info, sizeof(audio_info), "%s, %d Hz, %d canales, buffer %d", drv ? drv : "?", (int) have.freq, (int) have.channels, (int) have.samples);
+		host.audio_info = audio_info;
+		SDL_PauseAudioDevice(P.audio, 0);
+	}
+	const Uint32 max_bytes = (Uint32) host.audio_rate * 4 / 1000 * AUDIO_MAX_MS;
 
+	host.video_info = video_info;
 	host.open_folder = h_open_folder; host.set_fullscreen = h_fullscreen; host.set_title = h_title;
 	host.set_cursor_visible = h_cursor; host.key_name = h_key_name;
 	for (int i = 0; i < SDL_NumJoysticks(); i++) open_pad(i);
@@ -220,26 +248,24 @@ int main(int argc, char** argv) {
 	const double freq = (double) SDL_GetPerformanceFrequency();
 	double last = SDL_GetPerformanceCounter() / freq, next = last;
 	AppFrame frame;
-	int was_clocked = 0;
 	for (;;) {
 		pump_events(app);
-
-		/* Sincronización por audio: solo se avanza un fotograma cuando la cola está por debajo del objetivo. */
-		int clocked = P.audio && app_game_running(app) && !app_turbo(app);
-		if (clocked) {
-			Uint32 queued = SDL_GetQueuedAudioSize(P.audio);
-			if (queued > max_bytes) SDL_ClearQueuedAudio(P.audio);
-			else if (queued >= target_bytes) { SDL_Delay(1); continue; }
-		}
-		if (clocked != was_clocked) { was_clocked = clocked; next = SDL_GetPerformanceCounter() / freq; }
-
 		double now = SDL_GetPerformanceCounter() / freq;
 		double dt = now - last;
 		last = now;
 		if (dt > 0.1) dt = 0.1;
+
+		if (P.audio) {
+			Uint32 queued = SDL_GetQueuedAudioSize(P.audio);
+			if (queued > max_bytes) { SDL_ClearQueuedAudio(P.audio); queued = 0; }   /* seguridad (p. ej. tras arrastrar la ventana) */
+			app_audio_feedback(app, (int) (queued / 4));
+		}
+		double ta = SDL_GetPerformanceCounter() / freq;
 		if (!app_update(app, dt)) break;
+		double tb = SDL_GetPerformanceCounter() / freq;
 		app_render(app, &frame);
 		present(&frame);
+		app_perf_report(app, (tb - ta) * 1000.0, (SDL_GetPerformanceCounter() / freq - tb) * 1000.0);
 
 		if (P.audio) {
 			const int16_t* data;
@@ -248,18 +274,18 @@ int main(int argc, char** argv) {
 			if (n > 0) SDL_QueueAudio(P.audio, data, (Uint32) n * 4);
 		}
 
-		if (!clocked) {                       /* menús y aceleración: ritmo por reloj */
-			next += app_frame_time(app);
-			double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
-			if (delay > 0.002) SDL_Delay((Uint32) ((delay - 0.001) * 1000.0));
-			if (delay > -0.25) { while (SDL_GetPerformanceCounter() / freq < next) { } }
-			else next = SDL_GetPerformanceCounter() / freq;
-		}
+		/* ritmo por reloj */
+		next += app_frame_time(app);
+		double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
+		if (delay > 0.002) SDL_Delay((Uint32) ((delay - 0.001) * 1000.0));
+		if (delay > -0.25) { while (SDL_GetPerformanceCounter() / freq < next) { } }
+		else next = SDL_GetPerformanceCounter() / freq;
 	}
 
 	app_destroy(app);
 	if (P.audio) SDL_CloseAudioDevice(P.audio);
 	SDL_DestroyTexture(P.tex_ui); SDL_DestroyTexture(P.tex_game_sharp); SDL_DestroyTexture(P.tex_game_smooth);
+	SDL_DestroyTexture(P.tex_hud[0]); SDL_DestroyTexture(P.tex_hud[1]);
 	SDL_DestroyRenderer(P.ren);
 	SDL_DestroyWindow(P.win);
 	SDL_Quit();

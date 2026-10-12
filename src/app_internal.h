@@ -61,10 +61,12 @@ struct App {
 	uint32_t frame[EMU_W * EMU_H]; int have_frame;
 	int16_t audio[16384 * 2]; int audio_frames; int16_t audio_out[16384 * 2];
 	int audio_reset; int turbo;
+	double audio_ratio;              /* factor aplicado a la frecuencia de salida (control dinámico) */
 	double fps, fps_acc; int fps_n;
 
 	/* recursos */
-	Canvas *icon, *title, *bg_base, *ui;
+	Canvas *icon, *title, *bg_base, *ui, *hud_fps, *hud_toast;
+	double perf_update, perf_present;
 	Canvas *cards[NUM_GAMES], *cards_dark[NUM_GAMES], *backdrops[NUM_GAMES];
 };
 
