@@ -109,7 +109,7 @@ static void send_player(App* app, int type, int code, int value, int player) {
 	AppEvent e = {type, code, value, player};
 	app_event(app, &e);
 }
-static void send(App* app, int type, int code, int value) { send_player(app, type, code, value, 0); }
+static void send_app_event_j1(App* app, int type, int code, int value) { send_player(app, type, code, value, 0); }
 static int opened_pad_count(void) {
 	int n = 0;
 	for (int i = 0; i < 16; i++) if (P.pads[i]) n++;
@@ -146,17 +146,17 @@ static void pump_events(App* app) {
 	SDL_Event e;
 	while (SDL_PollEvent(&e)) {
 		switch (e.type) {
-		case SDL_QUIT: send(app, EV_QUIT, 0, 0); break;
-		case SDL_KEYDOWN: if (!e.key.repeat) send(app, EV_KEY_DOWN, map_key(e.key.keysym.sym), (e.key.keysym.mod & KMOD_ALT) ? 1 : 0); break;
-		case SDL_KEYUP: send(app, EV_KEY_UP, map_key(e.key.keysym.sym), 0); break;
-		case SDL_CONTROLLERDEVICEADDED: open_pad(e.cdevice.which); send(app, EV_PAD_COUNT, 0, opened_pad_count()); break;
-		case SDL_CONTROLLERDEVICEREMOVED: close_pad(e.cdevice.which); send(app, EV_PAD_COUNT, 0, opened_pad_count()); break;
+		case SDL_QUIT: send_app_event_j1(app, EV_QUIT, 0, 0); break;
+		case SDL_KEYDOWN: if (!e.key.repeat) send_app_event_j1(app, EV_KEY_DOWN, map_key(e.key.keysym.sym), (e.key.keysym.mod & KMOD_ALT) ? 1 : 0); break;
+		case SDL_KEYUP: send_app_event_j1(app, EV_KEY_UP, map_key(e.key.keysym.sym), 0); break;
+		case SDL_CONTROLLERDEVICEADDED: open_pad(e.cdevice.which); send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count()); break;
+		case SDL_CONTROLLERDEVICEREMOVED: close_pad(e.cdevice.which); send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count()); break;
 		case SDL_CONTROLLERBUTTONDOWN: send_pad_event(app, EV_PAD_DOWN, e.cbutton.button, 0, e.cbutton.which); break;
 		case SDL_CONTROLLERBUTTONUP: send_pad_event(app, EV_PAD_UP, e.cbutton.button, 0, e.cbutton.which); break;
 		case SDL_CONTROLLERAXISMOTION: send_pad_event(app, EV_PAD_AXIS, e.caxis.axis, e.caxis.value, e.caxis.which); break;
-		case SDL_WINDOWEVENT: if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) send(app, EV_FOCUS_LOST, 0, 0); break;
-		case SDL_MOUSEMOTION: { int x, y; mouse_to_ui(e.motion.x, e.motion.y, &x, &y); send(app, EV_MOUSE_MOVE, x, y); break; }
-		case SDL_MOUSEBUTTONDOWN: if (e.button.button == SDL_BUTTON_LEFT) { int x, y; mouse_to_ui(e.button.x, e.button.y, &x, &y); send(app, EV_MOUSE_DOWN, x, y); } break;
+		case SDL_WINDOWEVENT: if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) send_app_event_j1(app, EV_FOCUS_LOST, 0, 0); break;
+		case SDL_MOUSEMOTION: { int x, y; mouse_to_ui(e.motion.x, e.motion.y, &x, &y); send_app_event_j1(app, EV_MOUSE_MOVE, x, y); break; }
+		case SDL_MOUSEBUTTONDOWN: if (e.button.button == SDL_BUTTON_LEFT) { int x, y; mouse_to_ui(e.button.x, e.button.y, &x, &y); send_app_event_j1(app, EV_MOUSE_DOWN, x, y); } break;
 		default: break;
 		}
 	}
@@ -220,7 +220,7 @@ int main(int argc, char** argv) {
 
 	App* app = app_create(base, &host);
 	if (!app) { fprintf(stderr, "No se pudo iniciar el launcher\n"); return 1; }
-	send(app, EV_PAD_COUNT, 0, opened_pad_count());
+	send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count());
 
 	const double freq = (double) SDL_GetPerformanceFrequency();
 	double last = SDL_GetPerformanceCounter() / freq, next = last;
