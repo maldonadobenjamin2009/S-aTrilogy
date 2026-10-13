@@ -262,6 +262,7 @@ static void start_game(App* a, int i) {
 	}
 	a->game_idx = i;
 	a->audio_ratio = 1.0;
+	a->audio_fill_avg = 0;
 	a->have_frame = 0;
 	a->audio_frames = 0;
 	a->last_slot = 1;
@@ -723,10 +724,12 @@ void app_perf_report(App* a, double update_ms, double present_ms) {
 void app_audio_feedback(App* a, int queued_frames) {
 	if (!a->emu || a->state != ST_GAME || a->host.audio_rate <= 0) return;
 	double target = a->host.audio_rate * 0.040;                       /* ~40 ms de cola */
-	double err = (target - queued_frames) / target;                   /* >0: falta audio, <0: sobra */
+	if (a->audio_fill_avg <= 0) a->audio_fill_avg = target;
+	a->audio_fill_avg += (queued_frames - a->audio_fill_avg) * 0.02;  /* cola media: ignora los saltos por bloques */
+	double err = (target - a->audio_fill_avg) / target;               /* >0: falta audio, <0: sobra */
 	err = err < -1.0 ? -1.0 : (err > 1.0 ? 1.0 : err);
-	double want = 1.0 + 0.01 * err;                                   /* máx. ±1 % */
-	a->audio_ratio += (want - a->audio_ratio) * 0.1;                  /* suavizado: sin saltos de tono */
+	double want = 1.0 + 0.02 * err;                                   /* máx. ±2 % (solo ante desvíos grandes) */
+	a->audio_ratio += (want - a->audio_ratio) * 0.02;                 /* cambio lento: sin vibrato audible */
 	emu_set_audio_rate(a->emu, a->host.audio_rate * a->audio_ratio);
 }
 int app_debug_state(const App* a) { return (int) a->state; }

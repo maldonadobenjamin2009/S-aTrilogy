@@ -50,8 +50,9 @@ static const char* h_key_name(void* u, int code) { (void) u; return SDL_GetKeyNa
  *  - el ritmo del juego lo marca SIEMPRE el reloj (59,7275 fps); la tasa del audio se corrige ±1 % según la
  *    cola (control dinámico, app_audio_feedback) para que no haya retraso acumulado ni cortes. Si el dispositivo
  *    de audio consumiera a otra velocidad, el juego NO se ralentiza. */
-#define AUDIO_DEVICE_SAMPLES 512      /* buffer del dispositivo (~10 ms a 48 kHz) */
+#define AUDIO_DEVICE_SAMPLES 1024     /* buffer del dispositivo: mismo valor por defecto que mGBA (audioBuffers = 1024) */
 #define AUDIO_MAX_MS 250              /* si se pasa de esto (p. ej. tras arrastrar la ventana) se vacía */
+#define AUDIO_PREROLL_MS 40           /* colchón de silencio al empezar/reanudar (igual que la cola objetivo de app_audio_feedback) */
 
 static SDL_AudioDeviceID open_audio(SDL_AudioSpec* have) {
 	SDL_AudioSpec want;
@@ -269,7 +270,12 @@ int main(int argc, char** argv) {
 
 		if (P.audio) {
 			const int16_t* data;
-			if (app_audio_reset_requested(app)) SDL_ClearQueuedAudio(P.audio);
+			if (app_audio_reset_requested(app)) {          /* inicio / reanudar / cargar: vaciar y precargar silencio */
+				static char silence[1 << 15];
+				SDL_ClearQueuedAudio(P.audio);
+				Uint32 pre = (Uint32) host.audio_rate * 4 / 1000 * AUDIO_PREROLL_MS;
+				SDL_QueueAudio(P.audio, silence, pre < sizeof(silence) ? pre : (Uint32) sizeof(silence));
+			}
 			int n = app_take_audio(app, &data);
 			if (n > 0) SDL_QueueAudio(P.audio, data, (Uint32) n * 4);
 		}

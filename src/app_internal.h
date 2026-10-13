@@ -62,6 +62,7 @@ struct App {
 	int16_t audio[16384 * 2]; int audio_frames; int16_t audio_out[16384 * 2];
 	int audio_reset; int turbo;
 	double audio_ratio;              /* factor aplicado a la frecuencia de salida (control dinámico) */
+	double audio_fill_avg;           /* cola de audio media (fotogramas), filtrada */
 	double fps, fps_acc; int fps_n;
 
 	/* recursos */

@@ -21,18 +21,18 @@ endif
 CFLAGS ?= -O2
 MGBA_FLAGS := -std=gnu11 -w -I$(MGBA)/include -I$(MGBA)/src \
   -DM_CORE_GBA -DENABLE_VFS -DENABLE_DIRECTORIES -DENABLE_VFS_FD -DMINIMAL_CORE=2 -DDISABLE_THREADING \
-  -DMGBA_STANDALONE -DHAVE_STRDUP -DHAVE_LOCALTIME_R
+  -DMGBA_STANDALONE -DHAVE_STRDUP
 ifeq ($(PLATFORM),windows)
   MGBA_FLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
   OS_SRC := $(sort $(wildcard $(MGBA)/src/platform/windows/*.c))
   LDLIBS := -lm -lws2_32 -lshlwapi
   EXE := .exe
 else ifeq ($(PLATFORM),mac)
-  MGBA_FLAGS += -D_DARWIN_C_SOURCE -DHAVE_LOCALE -DHAVE_XLOCALE -DHAVE_SNPRINTF_L -DHAVE_STRTOF_L
+  MGBA_FLAGS += -DHAVE_LOCALTIME_R -D_DARWIN_C_SOURCE -DHAVE_LOCALE -DHAVE_XLOCALE -DHAVE_SNPRINTF_L -DHAVE_STRTOF_L
   OS_SRC := $(wildcard $(MGBA)/src/platform/posix/*.c) $(MGBA)/src/util/vfs/vfs-dirent.c
   LDLIBS := -lm
 else
-  MGBA_FLAGS += -D_GNU_SOURCE -DHAVE_LOCALE
+  MGBA_FLAGS += -D_GNU_SOURCE -DHAVE_LOCALE -DHAVE_LOCALTIME_R
   OS_SRC := $(wildcard $(MGBA)/src/platform/posix/*.c) $(MGBA)/src/util/vfs/vfs-dirent.c
   LDLIBS := -lm
 endif
@@ -70,7 +70,7 @@ $(OBJDIR)/src/emu.o: src/emu.c
 	$(CC) $(CFLAGS) $(MGBA_FLAGS) -c $< -o $@
 $(OBJDIR)/src/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -std=gnu11 -Wall -Isrc -c $< -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -Wall -Isrc -MMD -c $< -o $@
 
 SDL_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null || pkg-config --cflags sdl2 2>/dev/null)
 SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || pkg-config --libs sdl2 2>/dev/null)
@@ -87,6 +87,8 @@ test: $(BIN)/headless_test$(EXE)
 $(BIN)/headless_test$(EXE): tests/headless.c $(APP_OBJS) $(MGBA_OBJS)
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -std=gnu11 -Wall -Isrc -o $@ $^ $(LDLIBS)
+
+-include $(wildcard $(OBJDIR)/src/*.d)
 
 clean:
 	rm -rf $(OBJDIR) $(BIN)

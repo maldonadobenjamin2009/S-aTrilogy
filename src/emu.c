@@ -138,6 +138,15 @@ void emu_set_keys(Emu* emu, uint32_t keys) {
 
 void emu_run_frame(Emu* emu) {
 	emu->core->runFrame(emu->core);
+	/* La tasa del audio que produce el núcleo CAMBIA durante el juego: cuando el juego escribe SOUNDBIAS la
+	 * resolución pasa de 32768 Hz a 65536 / 131072 / 262144 Hz (core->audioSampleRate). El frontend oficial de
+	 * mGBA la consulta en cada callback; si se lee solo al abrir, el remuestreo es incorrecto (audio duplicado,
+	 * sonido roto y fotogramas de más). */
+	unsigned rate = emu->core->audioSampleRate(emu->core);
+	if (rate != emu->srcRate) {
+		emu->srcRate = rate;
+		mAudioResamplerSetSource(&emu->resampler, emu->core->getAudioBuffer(emu->core), rate, true);
+	}
 	mAudioResamplerProcess(&emu->resampler);
 }
 
