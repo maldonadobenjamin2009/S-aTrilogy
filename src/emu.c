@@ -74,19 +74,24 @@ const char* emu_version(void) {
 static void mgba_log_sink(struct mLogger* logger, int category, enum mLogLevel level,
                           const char* format, va_list args) {
 	(void) logger;
+	/* The linked lockstep driver can emit frequent DEBUG events. Discard them
+	 * before formatting, and especially never forward them to the Windows CMD;
+	 * synchronous console output was a major source of multiplayer slowdown. */
+	if (!(level & (mLOG_FATAL | mLOG_ERROR | mLOG_GAME_ERROR | mLOG_WARN))) return;
 	char message[2048];
 	vsnprintf(message, sizeof(message), format, args);
 	const char* name = mLogCategoryName(category);
 	if (level & (mLOG_FATAL | mLOG_ERROR | mLOG_GAME_ERROR)) {
 		debug_log_error("mGBA [%s]: %s", name ? name : "general", message);
-	} else if (level & mLOG_WARN) {
+	} else {
 		debug_log_warn("mGBA [%s]: %s", name ? name : "general", message);
 	}
 }
 
+static struct mLogger s_mgba_logger = { mgba_log_sink, NULL };
+
 void emu_enable_debug_logging(void) {
-	static struct mLogger logger = { mgba_log_sink, NULL };
-	mLogSetDefaultLogger(&logger);
+	mLogSetDefaultLogger(&s_mgba_logger);
 	debug_log_info("Registro de errores y avisos internos de mGBA activado");
 }
 
@@ -364,6 +369,10 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
 	second->thread.userData = second;
 	first->thread.frameCallback = linked_frame_callback;
 	second->thread.frameCallback = linked_frame_callback;
+	/* Route both worker loggers through the frontend sink. Without this, mGBA's
+	 * thread wrapper falls back to printf() for every lockstep DEBUG event. */
+	first->thread.logger.logger = &s_mgba_logger;
+	second->thread.logger.logger = &s_mgba_logger;
 	mLockstepThreadUserInit(&first->lockstepUser, &first->thread);
 	mLockstepThreadUserInit(&second->lockstepUser, &second->thread);
 	first->lockstepUser.d.sleep = safe_lockstep_sleep;

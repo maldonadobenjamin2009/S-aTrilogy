@@ -827,7 +827,7 @@ int app_update(App* a, double dt) {
 		a->turbo = !a->emu2 && turbo_active(a);
 		for (int k = 0; k < (a->turbo ? TURBO_FRAMES : 1); k++) {
 			emu_run_frame(a->emu);
-			if (a->emu2) emu_clear_audio(a->emu2); /* Prioridad de audio absoluta para J1 */
+			/* J2 descarta su audio en su propio hilo; evitamos bloquear su mutex desde el hilo UI. */
 			if (a->turbo) emu_clear_audio(a->emu);
 			else if (a->audio_frames < 16384 - 2048)
 				a->audio_frames += emu_read_audio(a->emu, a->audio + a->audio_frames * 2, 2048);
