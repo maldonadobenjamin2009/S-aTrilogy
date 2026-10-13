@@ -16,9 +16,11 @@ Emu* emu_open(const char* rom_path, const char* save_path, const char* bios_path
 Emu* emu_open_linked_pair(const char* rom_path, const char* save_path, const char* save_path2, const char* bios_path, unsigned audio_rate, Emu** secondary_out);
 void emu_close(Emu* e);
 void emu_reset(Emu* e);
+void emu_set_paused(Emu* e, int paused); /* pausa/reanuda ambos núcleos enlazados */
 void emu_set_keys(Emu* e, uint32_t keys);            /* bits: A,B,SELECT,START,RIGHT,LEFT,UP,DOWN,R,L */
 void emu_run_frame(Emu* e);
-const uint32_t* emu_video(Emu* e);                    /* 240x160, bytes R,G,B,X (uint32 0xXXBBGGRR) */
+const uint32_t* emu_video(Emu* e);                    /* compatibilidad; no usar para lectura concurrente */
+void emu_copy_video(Emu* e, uint32_t* dst);            /* copia segura del último fotograma, 240x160 */
 int emu_read_audio(Emu* e, int16_t* dst, int max_frames);   /* muestras estéreo ya remuestreadas */
 void emu_clear_audio(Emu* e);
 void emu_set_audio_rate(Emu* e, double rate);

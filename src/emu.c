@@ -14,7 +14,14 @@
 #include <mgba-util/vfs.h>
 #include <mgba-util/threading.h>
 
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
+#endif
+
 #include <stdlib.h>
+#include <errno.h>
 #include <string.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -37,6 +44,13 @@ struct Emu {
 	unsigned outRate;
 	unsigned srcRate;
 	int audioReady;
+	Mutex frameMutex;
+	Mutex audioMutex;
+	int frameMutexReady;
+	int audioMutexReady;
+	uint64_t nextFrameDeadlineUs;
+	uint64_t fpsReportStartUs;
+	unsigned fpsReportFrames;
 
 	/* Solo se usa en modo enlazado. La instancia primaria es propietaria del peer. */
 	struct Emu* peer;
@@ -76,6 +90,84 @@ void emu_enable_debug_logging(void) {
 	debug_log_info("Registro de errores y avisos internos de mGBA activado");
 }
 
+static void emu_process_audio(Emu* emu);
+
+/* Reloj monotónico y pacing independiente por núcleo. No sincroniza los FPS de J1/J2;
+ * el coordinador mGBA conserva únicamente la coordinación temporal necesaria para SIO. */
+static uint64_t emu_monotonic_us(void) {
+#ifdef _WIN32
+	LARGE_INTEGER frequency;
+	LARGE_INTEGER counter;
+	/* Evitar inicialización estática compartida entre los dos hilos GBA. */
+	if (!QueryPerformanceFrequency(&frequency) || frequency.QuadPart <= 0) return GetTickCount64() * 1000ULL;
+	QueryPerformanceCounter(&counter);
+	return (uint64_t) (counter.QuadPart / frequency.QuadPart) * 1000000ULL +
+	       (uint64_t) (counter.QuadPart % frequency.QuadPart) * 1000000ULL / (uint64_t) frequency.QuadPart;
+#else
+	struct timespec ts;
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return (uint64_t) time(NULL) * 1000000ULL;
+	return (uint64_t) ts.tv_sec * 1000000ULL + (uint64_t) ts.tv_nsec / 1000ULL;
+#endif
+}
+
+static void emu_sleep_us(uint64_t usec) {
+	if (!usec) return;
+#ifdef _WIN32
+	/* Sleep tiene resolución de milisegundos; deja margen pequeño para no sobrepasar mucho. */
+	if (usec >= 1500) Sleep((DWORD) ((usec - 500) / 1000));
+	else Sleep(0);
+#else
+	struct timespec req;
+	req.tv_sec = (time_t) (usec / 1000000ULL);
+	req.tv_nsec = (long) ((usec % 1000000ULL) * 1000ULL);
+	while (nanosleep(&req, &req) != 0 && errno == EINTR) { }
+#endif
+}
+
+static void emu_pace_linked_core(Emu* emu) {
+	const uint64_t frame_us = 1000000ULL / 60ULL;
+	uint64_t now = emu_monotonic_us();
+	if (!emu->nextFrameDeadlineUs) {
+		emu->nextFrameDeadlineUs = now + frame_us;
+	} else if (emu->nextFrameDeadlineUs + frame_us * 3 < now) {
+		/* Si el cable retuvo un núcleo, dejarlo recuperar un fotograma sin acumular retraso. */
+		emu->nextFrameDeadlineUs = now;
+	} else {
+		emu->nextFrameDeadlineUs += frame_us;
+	}
+	while ((now = emu_monotonic_us()) < emu->nextFrameDeadlineUs) {
+		emu_sleep_us(emu->nextFrameDeadlineUs - now);
+	}
+}
+
+static void linked_frame_callback(struct mCoreThread* thread) {
+	Emu* emu = thread ? (Emu*) thread->userData : NULL;
+	if (!emu || !emu->core) return;
+	if (emu->frameMutexReady) MutexLock(&emu->frameMutex);
+	memcpy(emu->videoSnapshot, emu->video, sizeof(emu->videoSnapshot));
+	if (emu->frameMutexReady) MutexUnlock(&emu->frameMutex);
+
+	uint64_t measuredAt = emu_monotonic_us();
+	if (!emu->fpsReportStartUs) emu->fpsReportStartUs = measuredAt;
+	++emu->fpsReportFrames;
+	if (measuredAt - emu->fpsReportStartUs >= 5000000ULL) {
+		double fps = (double) emu->fpsReportFrames * 1000000.0 /
+		             (double) (measuredAt - emu->fpsReportStartUs);
+		debug_log_info("Cable link J%d: %.1f FPS medidos en su hilo independiente", emu->playerId + 1, fps);
+		emu->fpsReportStartUs = measuredAt;
+		emu->fpsReportFrames = 0;
+	}
+	if (emu->playerId == 0) {
+		emu_process_audio(emu);
+	} else if (emu->audioMutexReady) {
+		/* J2 descarta su audio desde su propio hilo; nunca compite con la cola audible de J1. */
+		MutexLock(&emu->audioMutex);
+		mAudioBufferClear(emu->core->getAudioBuffer(emu->core));
+		MutexUnlock(&emu->audioMutex);
+	}
+	emu_pace_linked_core(emu);
+}
+
 static Emu* emu_open_internal(const char* rom_path, const char* save_path,
                               const char* bios_path, unsigned out_rate, int reset_now) {
 	if (!rom_path || !out_rate) return NULL;
@@ -97,6 +189,14 @@ static Emu* emu_open_internal(const char* rom_path, const char* save_path,
 	}
 	emu->core = core;
 	emu->outRate = out_rate;
+	if (MutexInit(&emu->frameMutex) != 0) {
+		free(emu); rom->close(rom); core->deinit(core); return NULL;
+	}
+	emu->frameMutexReady = 1;
+	if (MutexInit(&emu->audioMutex) != 0) {
+		MutexDeinit(&emu->frameMutex); free(emu); rom->close(rom); core->deinit(core); return NULL;
+	}
+	emu->audioMutexReady = 1;
 
 	mCoreInitConfig(core, NULL);
 	core->init(core);
@@ -154,12 +254,14 @@ static int link_requested_id(struct mLockstepUser* user) {
 }
 static void emu_process_audio(Emu* emu) {
 	if (!emu || !emu->core || !emu->audioReady) return;
+	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
 	unsigned rate = emu->core->audioSampleRate(emu->core);
 	if (rate != emu->srcRate) {
 		emu->srcRate = rate;
 		mAudioResamplerSetSource(&emu->resampler, emu->core->getAudioBuffer(emu->core), rate, true);
 	}
 	mAudioResamplerProcess(&emu->resampler);
+	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
 }
 
 static void close_linked(Emu* primary) {
@@ -200,6 +302,8 @@ static void close_linked(Emu* primary) {
 			secondary->core->deinit(secondary->core);
 			secondary->core = NULL;
 		}
+		if (secondary->audioMutexReady) MutexDeinit(&secondary->audioMutex);
+		if (secondary->frameMutexReady) MutexDeinit(&secondary->frameMutex);
 		free(secondary);
 	}
 	if (primary->audioReady) {
@@ -213,6 +317,8 @@ static void close_linked(Emu* primary) {
 		primary->core->deinit(primary->core);
 		primary->core = NULL;
 	}
+	if (primary->audioMutexReady) MutexDeinit(&primary->audioMutex);
+	if (primary->frameMutexReady) MutexDeinit(&primary->frameMutex);
 	free(primary);
 }
 
@@ -242,17 +348,22 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
 	first->playerId = 0;
 	second->playerId = 1;
 
-	/* El hilo del núcleo espera al frontend en cada VBlank. Así las dos
-	 * instancias avanzan al ritmo de la ventana sin llenar buffers a toda velocidad. */
-	first->core->opts.videoSync = true;
+	/* Cada núcleo administra sus propios fotogramas en su hilo. Se desactiva la
+	 * barrera de vídeo del frontend (que serializaba J1 y J2); el callback copia
+	 * cada imagen y limita cada emulador a ~60 FPS de forma independiente.
+	 * El cable link conserva la sincronización de ciclos/eventos de SIO requerida
+	 * por mGBA, pero ya no sincroniza los fotogramas con la ventana. */
+	first->core->opts.videoSync = false;
 	first->core->opts.audioSync = false;
-	second->core->opts.videoSync = true;
+	second->core->opts.videoSync = false;
 	second->core->opts.audioSync = false;
 
 	first->thread.core = first->core;
 	second->thread.core = second->core;
 	first->thread.userData = first;
 	second->thread.userData = second;
+	first->thread.frameCallback = linked_frame_callback;
+	second->thread.frameCallback = linked_frame_callback;
 	mLockstepThreadUserInit(&first->lockstepUser, &first->thread);
 	mLockstepThreadUserInit(&second->lockstepUser, &second->thread);
 	first->lockstepUser.d.sleep = safe_lockstep_sleep;
@@ -281,10 +392,10 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
 		return NULL;
 	}
 	second->threadStarted = 1;
-	/* No esperar un VBlank aquí: el frontend debe empezar a esperar el primer
-	 * fotograma inmediatamente para no perder la notificación de mCoreSync. */
+	/* Los snapshots se actualizan desde los callbacks de cada hilo; el frontend no
+	 * debe establecer una barrera por VBlank entre los dos núcleos. */
 	if (secondary_out) *secondary_out = second;
-	debug_log_info("Cable link listo: J1 izquierda, J2 derecha; audio de J1 prioritario");
+	debug_log_info("Cable link listo: J1 izquierda, J2 derecha; pacing de vídeo independiente; audio de J1 prioritario");
 	return first;
 }
 
@@ -309,22 +420,45 @@ void emu_close(Emu* emu) {
 		emu->core->unloadROM(emu->core);
 		emu->core->deinit(emu->core);
 	}
+	if (emu->audioMutexReady) MutexDeinit(&emu->audioMutex);
+	if (emu->frameMutexReady) MutexDeinit(&emu->frameMutex);
 	free(emu);
+}
+
+void emu_set_paused(Emu* emu, int paused) {
+	if (!emu || !emu->peer || !emu->link || !emu->thread.impl || !emu->peer->thread.impl) return;
+	Emu* second = emu->peer;
+	if (paused) {
+		/* Pedir primero ambas pausas de forma asíncrona y luego esperar por cada
+		 * worker. Así uno no puede seguir varios fotogramas mientras el otro se pausa. */
+		mCoreThreadPauseFromThread(&emu->thread);
+		mCoreThreadPauseFromThread(&second->thread);
+		mCoreThreadPause(&emu->thread);
+		mCoreThreadPause(&second->thread);
+	} else {
+		mCoreThreadUnpause(&emu->thread);
+		mCoreThreadUnpause(&second->thread);
+	}
 }
 
 void emu_reset(Emu* emu) {
 	if (!emu) return;
-	if (emu->peer && emu->link) {
+	int linked = emu->peer && emu->link;
+	if (linked) {
 		mCoreThreadReset(&emu->thread);
 		mCoreThreadReset(&emu->peer->thread);
 	} else {
 		emu->core->reset(emu->core);
 	}
+	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
 	mAudioBufferClear(&emu->out);
-	mAudioBufferClear(emu->core->getAudioBuffer(emu->core));
+	/* En pareja el buffer fuente pertenece al worker: no tocarlo desde el hilo UI. */
+	if (!linked) mAudioBufferClear(emu->core->getAudioBuffer(emu->core));
+	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
 	if (emu->peer) {
+		if (emu->peer->audioMutexReady) MutexLock(&emu->peer->audioMutex);
 		mAudioBufferClear(&emu->peer->out);
-		mAudioBufferClear(emu->peer->core->getAudioBuffer(emu->peer->core));
+		if (emu->peer->audioMutexReady) MutexUnlock(&emu->peer->audioMutex);
 	}
 }
 
@@ -336,35 +470,18 @@ void emu_run_frame(Emu* emu) {
 	if (!emu || !emu->core) return;
 	if (emu->peer && emu->link) {
 		Emu* second = emu->peer;
-		struct mCoreSync* sync1 = &emu->thread.impl->sync;
-		struct mCoreSync* sync2 = &second->thread.impl->sync;
-		/* Consume the players separately, releasing each core immediately after
-		 * copying its completed framebuffer. mGBA's lockstep scheduler keeps SIO
-		 * clocks aligned; neither core is force-paused by our frame callback. */
-		bool ready1 = mCoreSyncWaitFrameStart(sync1);
-		if (ready1) {
-			memcpy(emu->videoSnapshot, emu->video, sizeof(emu->videoSnapshot));
-			emu_process_audio(emu);
+		/* Poll no bloqueante: el callback de cada hilo ya actualizó su snapshot
+		 * al terminar el fotograma. Limpiamos el contador interno de mGBA, sin
+		 * esperar a J1 antes de permitir que J2 siga avanzando (o viceversa). */
+		if (emu->thread.impl) {
+			struct mCoreSync* sync = &emu->thread.impl->sync;
+			(void) mCoreSyncWaitFrameStart(sync);
+			mCoreSyncWaitFrameEnd(sync);
 		}
-		mCoreSyncWaitFrameEnd(sync1);
-		bool ready2 = mCoreSyncWaitFrameStart(sync2);
-		if (ready2) {
-			memcpy(second->videoSnapshot, second->video, sizeof(second->videoSnapshot));
-			/* J2 jamás envía audio al dispositivo anfitrión. Descartamos su mezcla
-			 * aquí, con el núcleo parado en VBlank, para no competir con el mixer. */
-			mAudioBufferClear(second->core->getAudioBuffer(second->core));
-		}
-		mCoreSyncWaitFrameEnd(sync2);
-		/* Una espera puede expirar durante un atasco del scheduler. Cuenta el
-		 * incidente sin inundar el log; permite distinguir pérdida de rendimiento
-		 * de errores de ROM o de dispositivo gráfico en Windows. */
-		static unsigned sync_wait_timeouts;
-		if (!ready1 || !ready2) {
-			++sync_wait_timeouts;
-			if (sync_wait_timeouts == 1 || sync_wait_timeouts % 60 == 0) {
-				debug_log_warn("Cable link: espera de fotograma agotada (%u; J1=%s, J2=%s)",
-				               sync_wait_timeouts, ready1 ? "listo" : "timeout", ready2 ? "listo" : "timeout");
-			}
+		if (second->thread.impl) {
+			struct mCoreSync* sync = &second->thread.impl->sync;
+			(void) mCoreSyncWaitFrameStart(sync);
+			mCoreSyncWaitFrameEnd(sync);
 		}
 		return;
 	}
@@ -374,24 +491,39 @@ void emu_run_frame(Emu* emu) {
 }
 
 const uint32_t* emu_video(Emu* emu) {
+	/* Compatibilidad con llamadas antiguas; el frontend concurrente debe usar emu_copy_video. */
 	return emu ? (const uint32_t*) emu->videoSnapshot : NULL;
+}
+
+void emu_copy_video(Emu* emu, uint32_t* dst) {
+	if (!emu || !dst) return;
+	if (emu->frameMutexReady) MutexLock(&emu->frameMutex);
+	memcpy(dst, emu->videoSnapshot, sizeof(emu->videoSnapshot));
+	if (emu->frameMutexReady) MutexUnlock(&emu->frameMutex);
 }
 
 int emu_read_audio(Emu* emu, int16_t* dst, int max_frames) {
 	if (!emu || !dst || max_frames <= 0) return 0;
-	return (int) mAudioBufferRead(&emu->out, dst, (size_t) max_frames);
+	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
+	int n = (int) mAudioBufferRead(&emu->out, dst, (size_t) max_frames);
+	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
+	return n;
 }
 
 void emu_set_audio_rate(Emu* emu, double rate) {
-	if (emu && emu->audioReady && rate > 0.0) mAudioResamplerSetDestination(&emu->resampler, &emu->out, rate);
+	if (!emu || !emu->audioReady || rate <= 0.0) return;
+	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
+	mAudioResamplerSetDestination(&emu->resampler, &emu->out, rate);
+	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
 }
 
 void emu_clear_audio(Emu* emu) {
 	if (!emu || !emu->core) return;
+	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
 	mAudioBufferClear(&emu->out);
-	/* In linked mode the core-owned source buffer is only cleared while that
-	 * player's VBlank is held by emu_run_frame. */
+	/* In linked mode the core-owned source buffer is cleared by that core's callback. */
 	if (!emu->link) mAudioBufferClear(emu->core->getAudioBuffer(emu->core));
+	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
 }
 
 static int save_state_one(Emu* emu, const char* path) {

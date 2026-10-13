@@ -236,13 +236,21 @@ static void do_slot(App* a, int n) {
 }
 
 static void quick_save(App* a) {
-	if (save_slot(a, a->last_slot)) toast_s(a, 2.0, "Guardado rápido (ranura %d)", a->last_slot);
+	int linked = a->emu2 != NULL;
+	if (linked) emu_set_paused(a->emu, 1);
+	int ok = save_slot(a, a->last_slot);
+	if (linked) emu_set_paused(a->emu, 0);
+	if (ok) toast_s(a, 2.0, "Guardado rápido (ranura %d)", a->last_slot);
 	else toast_s(a, 2.0, "No se pudo guardar");
 }
 static void quick_load(App* a) {
 	char p[PATH_MAX_APP + 16];
 	slot_path(a, a->last_slot, p, sizeof(p));
-	if (slot_exists(a, a->last_slot) && emu_load_state(a->emu, p)) {
+	int linked = a->emu2 != NULL;
+	if (linked) emu_set_paused(a->emu, 1);
+	int ok = slot_exists(a, a->last_slot) && emu_load_state(a->emu, p);
+	if (linked) emu_set_paused(a->emu, 0);
+	if (ok) {
 		toast_s(a, 2.0, "Carga rápida (ranura %d)", a->last_slot);
 		a->audio_frames = 0; a->audio_reset = 1;
 	} else toast_s(a, 2.0, "La ranura %d está vacía", a->last_slot);
@@ -335,6 +343,7 @@ static void pause_game(App* a) {
 	for (int i = 0; i < PAUSE_COUNT; i++) a->pause_anim[i] = 0;
 	emu_set_keys(a->emu, 0);
 	if (a->emu2) emu_set_keys(a->emu2, 0);
+	emu_set_paused(a->emu, 1);
 	clear_inputs(a);
 	a->audio_frames = 0;
 	a->audio_reset = 1;
@@ -343,6 +352,7 @@ static void pause_game(App* a) {
 
 static void resume_game(App* a) {
 	a->state = ST_GAME;
+	emu_set_paused(a->emu, 0);
 	clear_inputs(a);
 	emu_clear_audio(a->emu);
 	if (a->emu2) emu_clear_audio(a->emu2);
@@ -813,7 +823,8 @@ int app_update(App* a, double dt) {
 	if (a->state == ST_GAME && a->emu) {
 		emu_set_keys(a->emu, keymask(a));
 		if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
-		a->turbo = turbo_active(a);
+		/* El turbo por frame pertenece al modo single-thread; el par enlazado tiene pacing independiente. */
+		a->turbo = !a->emu2 && turbo_active(a);
 		for (int k = 0; k < (a->turbo ? TURBO_FRAMES : 1); k++) {
 			emu_run_frame(a->emu);
 			if (a->emu2) emu_clear_audio(a->emu2); /* Prioridad de audio absoluta para J1 */
@@ -822,8 +833,8 @@ int app_update(App* a, double dt) {
 				a->audio_frames += emu_read_audio(a->emu, a->audio + a->audio_frames * 2, 2048);
 			else emu_clear_audio(a->emu);
 		}
-		memcpy(a->frame, emu_video(a->emu), sizeof(a->frame));
-		if (a->emu2) memcpy(a->frame2, emu_video(a->emu2), sizeof(a->frame2));
+		emu_copy_video(a->emu, a->frame);
+		if (a->emu2) emu_copy_video(a->emu2, a->frame2);
 		a->have_frame = 1;
 		a->fps_n++;
 		a->fps_acc += dt;
