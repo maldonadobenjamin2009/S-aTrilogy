@@ -1,5 +1,6 @@
 /* app_logic.c - estado, entrada, menús, emulación, ranuras de guardado (portable). */
 #include "app_internal.h"
+#include "debug_log.h"
 #include "png.h"
 #include <ctype.h>
 #include <stdarg.h>
@@ -252,6 +253,8 @@ static void set_cursor(App* a) {
 	if (a->host.set_cursor_visible) a->host.set_cursor_visible(a->host.user, a->state != ST_GAME && !a->input_pad);
 }
 
+static int s_logged_first_audio_chunk;
+
 static void start_game_now(App* a, int i, int multiplayer) {
 	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
@@ -271,12 +274,19 @@ static void start_game_now(App* a, int i, int multiplayer) {
 	}
 	if (!a->emu) {
 		a->emu2 = NULL;
+		debug_log_error("No se pudo iniciar %s en modo %s", GAMES[i].title, multiplayer ? "multijugador" : "un jugador");
 		app_modal(a, "No se pudo iniciar el juego", multiplayer
 		          ? "mGBA no pudo crear la conexión por cable link. Comprueba que la ROM de GBA sea válida."
 		          : "mGBA no pudo abrir la ROM. Comprueba que es una ROM de GBA válida (.gba sin comprimir).");
 		return;
 	}
 	a->game_idx = i;
+	a->audio_ratio = 1.0;
+	a->audio_fill_avg = 0.0;
+	s_logged_first_audio_chunk = 0;
+	debug_log_info("Juego iniciado: %s; modo=%s; volumen=%d%%; frecuencia de salida=%d Hz",
+	               GAMES[i].title, a->emu2 ? "dos jugadores" : "un jugador",
+	               a->cfg.volume, a->host.audio_rate);
 	a->have_frame = 0;
 	a->audio_frames = 0;
 	a->last_slot = 1;
@@ -828,12 +838,31 @@ int app_take_audio(App* a, const int16_t** data) {
 	int n = a->audio_frames;
 	if (a->state != ST_GAME || n <= 0) { a->audio_frames = 0; *data = a->audio_out; return 0; }
 	int vol = a->cfg.volume;
+	if (!s_logged_first_audio_chunk) {
+		debug_log_info("Primer bloque de audio generado: %d fotogramas de muestra, volumen de launcher=%d%%", n, vol);
+		s_logged_first_audio_chunk = 1;
+	}
 	for (int i = 0; i < n * 2; i++) a->audio_out[i] = (int16_t) ((a->audio[i] * vol) / 100);
 	a->audio_frames = 0;
 	*data = a->audio_out;
 	return n;
 }
+
 int app_audio_reset_requested(App* a) { int r = a->audio_reset; a->audio_reset = 0; return r; }
+
+void app_audio_feedback(App* a, int queued_frames) {
+	if (!a->emu || a->state != ST_GAME || a->host.audio_rate <= 0) return;
+	double target = a->host.audio_rate * 0.040;
+	if (a->audio_fill_avg <= 0) a->audio_fill_avg = target;
+	a->audio_fill_avg += (queued_frames - a->audio_fill_avg) * 0.02;
+	double err = (target - a->audio_fill_avg) / target;
+	if (err < -1.0) err = -1.0;
+	if (err > 1.0) err = 1.0;
+	double want = 1.0 + 0.02 * err;
+	a->audio_ratio += (want - a->audio_ratio) * 0.02;
+	emu_set_audio_rate(a->emu, a->host.audio_rate * a->audio_ratio);
+}
+
 int app_debug_state(const App* a) { return (int) a->state; }
 
 /* ---------------------------------------------------------------- crear / destruir */

@@ -52,7 +52,7 @@ else()
 endif()
 list(APPEND MGBA_SRCS ${OS_SRC})
 
-add_library(emu_core STATIC ${MGBA_SRCS} src/emu.c)
+add_library(emu_core STATIC ${MGBA_SRCS} src/emu.c src/debug_log.c)
 target_include_directories(emu_core PUBLIC ${MGBA}/include src PRIVATE ${MGBA}/src)
 target_compile_definitions(emu_core PRIVATE
   M_CORE_GBA ENABLE_VFS ENABLE_DIRECTORIES ENABLE_VFS_FD MINIMAL_CORE=2 MGBA_STANDALONE

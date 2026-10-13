@@ -1,0 +1,4 @@
+BIOS DE GBA (OPCIONAL)
+======================
+Los juegos funcionan sin BIOS (mGBA incluye una compatible).
+Si quieres usar la original, copia aqui tu archivo y llamalo exactamente:  gba_bios.bin

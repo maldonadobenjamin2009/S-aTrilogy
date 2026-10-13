@@ -1,5 +1,6 @@
 /* emu.c - mGBA integrado y coordinación de dos núcleos GBA por cable link. */
 #include <mgba/core/core.h>
+#include <mgba/core/log.h>
 #include <mgba/core/serialize.h>
 #include <mgba/core/version.h>
 #include <mgba/core/thread.h>
@@ -19,6 +20,10 @@
 #include <stdio.h>
 
 #include "emu.h"
+#include "debug_log.h"
+#ifndef EMU_INTERP
+#define EMU_INTERP mINTERPOLATOR_SINC
+#endif
 #define VIDEO_W EMU_W
 #define VIDEO_H EMU_H
 
@@ -52,13 +57,33 @@ const char* emu_version(void) {
 	return projectVersion;
 }
 
+static void mgba_log_sink(struct mLogger* logger, int category, enum mLogLevel level,
+                          const char* format, va_list args) {
+	(void) logger;
+	char message[2048];
+	vsnprintf(message, sizeof(message), format, args);
+	const char* name = mLogCategoryName(category);
+	if (level & (mLOG_FATAL | mLOG_ERROR | mLOG_GAME_ERROR)) {
+		debug_log_error("mGBA [%s]: %s", name ? name : "general", message);
+	} else if (level & mLOG_WARN) {
+		debug_log_warn("mGBA [%s]: %s", name ? name : "general", message);
+	}
+}
+
+void emu_enable_debug_logging(void) {
+	static struct mLogger logger = { mgba_log_sink, NULL };
+	mLogSetDefaultLogger(&logger);
+	debug_log_info("Registro de errores y avisos internos de mGBA activado");
+}
+
 static Emu* emu_open_internal(const char* rom_path, const char* save_path,
                               const char* bios_path, unsigned out_rate, int reset_now) {
 	if (!rom_path || !out_rate) return NULL;
 	struct VFile* rom = VFileOpen(rom_path, O_RDONLY);
-	if (!rom) return NULL;
+	if (!rom) { debug_log_error("No se pudo abrir la ROM: %s", rom_path); return NULL; }
 	struct mCore* core = mCoreFindVF(rom);
 	if (!core || core->platform(core) != mPLATFORM_GBA) {
+		debug_log_error("La ROM no es una ROM GBA válida: %s", rom_path);
 		rom->close(rom);
 		if (core) core->deinit(core);
 		return NULL;
@@ -79,7 +104,7 @@ static Emu* emu_open_internal(const char* rom_path, const char* save_path,
 	core->setAudioBufferSize(core, 2048);
 	emu->srcRate = core->audioSampleRate(core);
 	mAudioBufferInit(&emu->out, 8192, 2);
-	mAudioResamplerInit(&emu->resampler, mINTERPOLATOR_COSINE);
+	mAudioResamplerInit(&emu->resampler, EMU_INTERP);
 	mAudioResamplerSetDestination(&emu->resampler, &emu->out, out_rate);
 	mAudioResamplerSetSource(&emu->resampler, core->getAudioBuffer(core), emu->srcRate, true);
 	emu->audioReady = 1;
@@ -87,9 +112,13 @@ static Emu* emu_open_internal(const char* rom_path, const char* save_path,
 	mCoreConfigSetDefaultIntValue(&core->config, "useBios", (bios_path && bios_path[0]) ? 1 : 0);
 	mCoreConfigSetDefaultIntValue(&core->config, "skipBios", 1);
 	mCoreConfigSetDefaultIntValue(&core->config, "idleOptimization", 1);
-	core->loadConfig(core, &core->config);
+	/* Restaurar el volumen de salida de mGBA: el valor por defecto del núcleo puede ser 0. */
+	mCoreConfigSetDefaultIntValue(&core->config, "volume", 0x100);
+	mCoreConfigSetDefaultIntValue(&core->config, "mute", 0);
+	mCoreLoadForeignConfig(core, &core->config);
 
 	if (!core->loadROM(core, rom)) {
+		debug_log_error("mGBA no pudo cargar la ROM: %s", rom_path);
 		rom->close(rom);
 		emu_close(emu);
 		return NULL;
@@ -123,6 +152,16 @@ static int link_requested_id(struct mLockstepUser* user) {
 	Emu* emu = tu->thread ? (Emu*) tu->thread->userData : NULL;
 	return emu ? emu->playerId : -1;
 }
+static void emu_process_audio(Emu* emu) {
+	if (!emu || !emu->core || !emu->audioReady) return;
+	unsigned rate = emu->core->audioSampleRate(emu->core);
+	if (rate != emu->srcRate) {
+		emu->srcRate = rate;
+		mAudioResamplerSetSource(&emu->resampler, emu->core->getAudioBuffer(emu->core), rate, true);
+	}
+	mAudioResamplerProcess(&emu->resampler);
+}
+
 static void close_linked(Emu* primary) {
 	if (!primary) return;
 	Emu* secondary = primary->peer;
@@ -181,15 +220,18 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
                           const char* save_path2, const char* bios_path,
                           unsigned out_rate, Emu** secondary_out) {
 	if (secondary_out) *secondary_out = NULL;
+	debug_log_info("Creando pareja mGBA con cable link para ROM: %s", rom_path ? rom_path : "(nula)");
 	Emu* first = emu_open_internal(rom_path, save_path, bios_path, out_rate, 0);
-	if (!first) return NULL;
+	if (!first) { debug_log_error("Falló la inicialización de J1/cable link"); return NULL; }
 	Emu* second = emu_open_internal(rom_path, save_path2, bios_path, out_rate, 0);
 	if (!second) {
+		debug_log_error("Falló la inicialización de J2/cable link");
 		emu_close(first);
 		return NULL;
 	}
 	struct LinkSession* link = calloc(1, sizeof(*link));
 	if (!link) {
+		debug_log_error("No hay memoria para crear la sesión de cable link");
 		emu_close(first);
 		emu_close(second);
 		return NULL;
@@ -228,11 +270,13 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
 	first->driverAttached = second->driverAttached = 1;
 
 	if (!mCoreThreadStart(&first->thread)) {
+		debug_log_error("mGBA no pudo iniciar el hilo de J1");
 		close_linked(first);
 		return NULL;
 	}
 	first->threadStarted = 1;
 	if (!mCoreThreadStart(&second->thread)) {
+		debug_log_error("mGBA no pudo iniciar el hilo de J2");
 		close_linked(first);
 		return NULL;
 	}
@@ -240,6 +284,7 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
 	/* No esperar un VBlank aquí: el frontend debe empezar a esperar el primer
 	 * fotograma inmediatamente para no perder la notificación de mCoreSync. */
 	if (secondary_out) *secondary_out = second;
+	debug_log_info("Cable link listo: J1 izquierda, J2 derecha; audio de J1 prioritario");
 	return first;
 }
 
@@ -299,7 +344,7 @@ void emu_run_frame(Emu* emu) {
 		bool ready1 = mCoreSyncWaitFrameStart(sync1);
 		if (ready1) {
 			memcpy(emu->videoSnapshot, emu->video, sizeof(emu->videoSnapshot));
-			mAudioResamplerProcess(&emu->resampler);
+			emu_process_audio(emu);
 		}
 		mCoreSyncWaitFrameEnd(sync1);
 		bool ready2 = mCoreSyncWaitFrameStart(sync2);
@@ -314,7 +359,7 @@ void emu_run_frame(Emu* emu) {
 	}
 	emu->core->runFrame(emu->core);
 	memcpy(emu->videoSnapshot, emu->video, sizeof(emu->videoSnapshot));
-	mAudioResamplerProcess(&emu->resampler);
+	emu_process_audio(emu);
 }
 
 const uint32_t* emu_video(Emu* emu) {
@@ -324,6 +369,10 @@ const uint32_t* emu_video(Emu* emu) {
 int emu_read_audio(Emu* emu, int16_t* dst, int max_frames) {
 	if (!emu || !dst || max_frames <= 0) return 0;
 	return (int) mAudioBufferRead(&emu->out, dst, (size_t) max_frames);
+}
+
+void emu_set_audio_rate(Emu* emu, double rate) {
+	if (emu && emu->audioReady && rate > 0.0) mAudioResamplerSetDestination(&emu->resampler, &emu->out, rate);
 }
 
 void emu_clear_audio(Emu* emu) {

@@ -9,6 +9,7 @@
 typedef struct Emu Emu;
 
 const char* emu_version(void);
+void emu_enable_debug_logging(void);
 /* save_path/bios_path pueden ser NULL. audio_rate = frecuencia de salida (p. ej. 48000). */
 Emu* emu_open(const char* rom_path, const char* save_path, const char* bios_path, unsigned audio_rate);
 /* Abre dos núcleos de la misma ROM conectados al cable link de mGBA. J1 es la instancia devuelta por emu_close; J2 se devuelve en secondary_out. */
@@ -20,6 +21,7 @@ void emu_run_frame(Emu* e);
 const uint32_t* emu_video(Emu* e);                    /* 240x160, bytes R,G,B,X (uint32 0xXXBBGGRR) */
 int emu_read_audio(Emu* e, int16_t* dst, int max_frames);   /* muestras estéreo ya remuestreadas */
 void emu_clear_audio(Emu* e);
+void emu_set_audio_rate(Emu* e, double rate);
 int emu_save_state(Emu* e, const char* path);
 int emu_load_state(Emu* e, const char* path);
 

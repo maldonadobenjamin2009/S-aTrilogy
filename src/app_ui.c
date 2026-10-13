@@ -356,6 +356,10 @@ static void draw_settings(App* a, Canvas* c) {
 	char buf[96];
 	snprintf(buf, sizeof(buf), "Motor: mGBA integrado (%s)", emu_version());
 	T(c, buf, p.x + 50, p.y + p.h - 120, 22, C_GREEN, TX_VMID);
+	snprintf(buf, sizeof(buf), "Audio: %s", a->host.audio_info && a->host.audio_info[0] ? a->host.audio_info : (a->host.has_audio ? "activo" : "sin dispositivo"));
+	T(c, buf, p.x + 50, p.y + p.h - 92, 22, a->host.has_audio ? C_GREEN : C_RED, TX_VMID);
+	snprintf(buf, sizeof(buf), "Vídeo: %s", a->host.video_info && a->host.video_info[0] ? a->host.video_info : "?");
+	T(c, buf, p.x + 50, p.y + p.h - 64, 22, C_GREEN, TX_VMID);
 	Hint h[3] = {{GL_DPAD, "↑ ↓", "Mover"}, {GL_CROSS, "Enter", "Cambiar"}, {GL_CIRCLE, "Esc", "Volver"}};
 	draw_hints(a, c, h, 3, p.x + p.w - 30, p.y + p.h - 50);
 }

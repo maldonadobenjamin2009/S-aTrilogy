@@ -1,14 +1,13 @@
 IMÁGENES DEL LAUNCHER
 =====================
-Formatos válidos: .png, .jpg, .jpeg, .webp (el nombre no distingue mayúsculas).
-Si falta alguna imagen, el launcher dibuja un marcador de posición.
+Formato: PNG (con o sin transparencia). Si usas JPG/WebP, conviértelo antes a PNG.
+El nombre no distingue mayúsculas. Si falta alguna imagen, el launcher dibuja un marcador de posición.
 
 assets/icon.png                 Icono de la ventana y de la cabecera (cuadrado, 256x256)
-assets/title.png                Imagen de título/logo, fondo transparente (aprox. 1400x260; se muestra a max. 720x130)
+assets/title.png                Imagen de título/logo con fondo transparente (aprox. 1400x260; se muestra a max. 720x130)
 assets/games/sonicadvance.png   Imagen ancha de Sonic Advance
 assets/games/sonicadvance2.png  Imagen ancha de Sonic Advance 2
 assets/games/sonicadvance3.png  Imagen ancha de Sonic Advance 3
     -> Recomendado 16:9 (1280x720). Se recorta al centro para la tarjeta (560x315)
        y se usa difuminada como fondo del juego seleccionado.
 assets/background.png           (opcional) fondo general 1920x1080
-assets/fonts/*.ttf              (opcional) tipografía propia; se usa la primera que haya

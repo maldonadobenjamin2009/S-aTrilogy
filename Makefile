@@ -54,7 +54,7 @@ UTIL_SRC := circle-buffer.c configuration.c crc32.c formatting.c gbk-table.c has
 MGBA_SRCS := $(addprefix $(MGBA)/src/arm/,$(ARM_SRC)) $(addprefix $(MGBA)/src/core/,$(CORE_SRC)) \
   $(addprefix $(MGBA)/src/gba/,$(GBA_SRC)) $(MGBA)/src/gb/audio.c $(addprefix $(MGBA)/src/util/,$(UTIL_SRC)) \
   $(MGBA)/src/third-party/inih/ini.c $(MGBA)/src/feature/thread-proxy.c $(MGBA)/src/feature/video-logger.c $(OS_SRC) third_party/version.c
-APP_SRCS  := src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/emu.c src/app_logic.c src/app_ui.c
+APP_SRCS  := src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/emu.c src/debug_log.c src/app_logic.c src/app_ui.c
 
 OBJDIR := build
 MGBA_OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(MGBA_SRCS))

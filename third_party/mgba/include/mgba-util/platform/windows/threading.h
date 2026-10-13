@@ -18,17 +18,17 @@ typedef CONDITION_VARIABLE Condition;
 
 static inline int MutexInit(Mutex* mutex) {
 	InitializeCriticalSection(mutex);
-	return GetLastError();
+	return 0;
 }
 
 static inline int MutexDeinit(Mutex* mutex) {
 	DeleteCriticalSection(mutex);
-	return GetLastError();
+	return 0;
 }
 
 static inline int MutexLock(Mutex* mutex) {
 	EnterCriticalSection(mutex);
-	return GetLastError();
+	return 0;
 }
 
 static inline int MutexTryLock(Mutex* mutex) {
@@ -40,12 +40,12 @@ static inline int MutexTryLock(Mutex* mutex) {
 
 static inline int MutexUnlock(Mutex* mutex) {
 	LeaveCriticalSection(mutex);
-	return GetLastError();
+	return 0;
 }
 
 static inline int ConditionInit(Condition* cond) {
 	InitializeConditionVariable(cond);
-	return GetLastError();
+	return 0;
 }
 
 static inline int ConditionDeinit(Condition* cond) {
@@ -55,23 +55,31 @@ static inline int ConditionDeinit(Condition* cond) {
 }
 
 static inline int ConditionWait(Condition* cond, Mutex* mutex) {
-	SleepConditionVariableCS(cond, mutex, INFINITE);
-	return GetLastError();
+	if (SleepConditionVariableCS(cond, mutex, INFINITE)) {
+		return 0;
+	}
+	return (int) GetLastError();
 }
 
 static inline int ConditionWaitTimed(Condition* cond, Mutex* mutex, int32_t timeoutMs) {
-	SleepConditionVariableCS(cond, mutex, timeoutMs);
-	return GetLastError();
+	if (SleepConditionVariableCS(cond, mutex, (DWORD) timeoutMs)) {
+		return 0;
+	}
+	return (int) GetLastError();
 }
 
 static inline int ConditionWake(Condition* cond) {
 	WakeAllConditionVariable(cond);
-	return GetLastError();
+	return 0;
 }
 
 static inline int ThreadCreate(Thread* thread, ThreadEntry entry, void* context) {
-	*thread = CreateThread(NULL, 0, entry, context, 0, 0);
-	return GetLastError();
+	HANDLE created = CreateThread(NULL, 0, entry, context, 0, 0);
+	if (!created) {
+		return (int) GetLastError();
+	}
+	*thread = created;
+	return 0;
 }
 
 static inline int ThreadJoin(Thread* thread) {

@@ -65,6 +65,8 @@ struct App {
 	uint32_t frame[EMU_W * EMU_H], frame2[EMU_W * EMU_H]; int have_frame;
 	int16_t audio[16384 * 2]; int audio_frames; int16_t audio_out[16384 * 2];
 	int audio_reset; int turbo;
+	double audio_ratio;              /* ajuste suave de la frecuencia de audio */
+	double audio_fill_avg;           /* media filtrada de la cola de audio */
 	double fps, fps_acc; int fps_n;
 
 	/* recursos */

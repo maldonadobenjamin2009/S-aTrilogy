@@ -37,6 +37,8 @@ typedef struct {
 	const char* (*key_name)(void* user, int code);   /* opcional */
 	int audio_rate;                                   /* frecuencia con la que la plataforma abrió el audio */
 	int has_audio;
+	const char* audio_info;
+	const char* video_info;
 } AppHost;
 
 typedef struct {
@@ -58,6 +60,7 @@ void app_render(App* a, AppFrame* out);
 double app_frame_time(const App* a);                /* segundos que debe durar cada fotograma */
 int app_take_audio(App* a, const int16_t** data);   /* fotogramas estéreo pendientes (ya con volumen) */
 int app_audio_reset_requested(App* a);              /* 1 una vez tras pausar/reanudar/cargar */
+void app_audio_feedback(App* a, int queued_frames);  /* ajuste suave para evitar retraso y cortes */
 
 /* Para pruebas */
 int app_debug_state(const App* a);
