@@ -355,6 +355,17 @@ void emu_run_frame(Emu* emu) {
 			mAudioBufferClear(second->core->getAudioBuffer(second->core));
 		}
 		mCoreSyncWaitFrameEnd(sync2);
+		/* Una espera puede expirar durante un atasco del scheduler. Cuenta el
+		 * incidente sin inundar el log; permite distinguir pérdida de rendimiento
+		 * de errores de ROM o de dispositivo gráfico en Windows. */
+		static unsigned sync_wait_timeouts;
+		if (!ready1 || !ready2) {
+			++sync_wait_timeouts;
+			if (sync_wait_timeouts == 1 || sync_wait_timeouts % 60 == 0) {
+				debug_log_warn("Cable link: espera de fotograma agotada (%u; J1=%s, J2=%s)",
+				               sync_wait_timeouts, ready1 ? "listo" : "timeout", ready2 ? "listo" : "timeout");
+			}
+		}
 		return;
 	}
 	emu->core->runFrame(emu->core);

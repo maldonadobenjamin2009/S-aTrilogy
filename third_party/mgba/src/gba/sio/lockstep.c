@@ -10,7 +10,13 @@
 
 #define DRIVER_ID 0x6B636F4C
 #define DRIVER_STATE_VERSION 1
-#define LOCKSTEP_INTERVAL 4096
+/* The frontend runs both local GBA cores on separate worker threads.
+ * 4096 cycles forced roughly 4,000 sleep/wake handshakes per emulated second
+ * and saturated slower Windows CPUs in local multiplayer. Increase the
+ * periodic scheduling quantum while keeping actual serial-transfer events
+ * timestamped and queued at their exact cycle, so wire transfers remain
+ * cycle-driven instead of waiting for this coarse heartbeat. */
+#define LOCKSTEP_INTERVAL 32768
 #define UNLOCKED_INTERVAL 4096
 #define HARD_SYNC_INTERVAL 0x80000
 #define TARGET(P) (1 << (P))
