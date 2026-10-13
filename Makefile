@@ -20,7 +20,7 @@ endif
 
 CFLAGS ?= -O2
 MGBA_FLAGS := -std=gnu11 -w -I$(MGBA)/include -I$(MGBA)/src \
-  -DM_CORE_GBA -DENABLE_VFS -DENABLE_DIRECTORIES -DENABLE_VFS_FD -DMINIMAL_CORE=2 -DDISABLE_THREADING \
+  -DM_CORE_GBA -DENABLE_VFS -DENABLE_DIRECTORIES -DENABLE_VFS_FD -DMINIMAL_CORE=2 \
   -DMGBA_STANDALONE -DHAVE_STRDUP
 ifeq ($(PLATFORM),windows)
   MGBA_FLAGS += -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64
@@ -30,11 +30,12 @@ ifeq ($(PLATFORM),windows)
 else ifeq ($(PLATFORM),mac)
   MGBA_FLAGS += -DHAVE_LOCALTIME_R -D_DARWIN_C_SOURCE -DHAVE_LOCALE -DHAVE_XLOCALE -DHAVE_SNPRINTF_L -DHAVE_STRTOF_L
   OS_SRC := $(wildcard $(MGBA)/src/platform/posix/*.c) $(MGBA)/src/util/vfs/vfs-dirent.c
-  LDLIBS := -lm
+  MGBA_FLAGS += -DUSE_PTHREADS
+  LDLIBS := -lm -pthread
 else
-  MGBA_FLAGS += -D_GNU_SOURCE -DHAVE_LOCALE -DHAVE_LOCALTIME_R
+  MGBA_FLAGS += -D_GNU_SOURCE -DHAVE_LOCALE -DHAVE_LOCALTIME_R -DUSE_PTHREADS
   OS_SRC := $(wildcard $(MGBA)/src/platform/posix/*.c) $(MGBA)/src/util/vfs/vfs-dirent.c
-  LDLIBS := -lm
+  LDLIBS := -lm -pthread
 endif
 
 ARM_SRC  := arm.c decoder-arm.c decoder.c decoder-thumb.c isa-arm.c isa-thumb.c
@@ -52,7 +53,7 @@ UTIL_SRC := circle-buffer.c configuration.c crc32.c formatting.c gbk-table.c has
 
 MGBA_SRCS := $(addprefix $(MGBA)/src/arm/,$(ARM_SRC)) $(addprefix $(MGBA)/src/core/,$(CORE_SRC)) \
   $(addprefix $(MGBA)/src/gba/,$(GBA_SRC)) $(MGBA)/src/gb/audio.c $(addprefix $(MGBA)/src/util/,$(UTIL_SRC)) \
-  $(MGBA)/src/third-party/inih/ini.c $(OS_SRC) third_party/version.c
+  $(MGBA)/src/third-party/inih/ini.c $(MGBA)/src/feature/thread-proxy.c $(MGBA)/src/feature/video-logger.c $(OS_SRC) third_party/version.c
 APP_SRCS  := src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/emu.c src/app_logic.c src/app_ui.c
 
 OBJDIR := build
@@ -70,7 +71,7 @@ $(OBJDIR)/src/emu.o: src/emu.c
 	$(CC) $(CFLAGS) $(MGBA_FLAGS) -c $< -o $@
 $(OBJDIR)/src/%.o: src/%.c
 	@mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -std=gnu11 -Wall -Isrc -MMD -c $< -o $@
+	$(CC) $(CFLAGS) -std=gnu11 -Wall -Isrc -c $< -o $@
 
 SDL_CFLAGS := $(shell sdl2-config --cflags 2>/dev/null || pkg-config --cflags sdl2 2>/dev/null)
 SDL_LIBS   := $(shell sdl2-config --libs 2>/dev/null || pkg-config --libs sdl2 2>/dev/null)
@@ -87,8 +88,6 @@ test: $(BIN)/headless_test$(EXE)
 $(BIN)/headless_test$(EXE): tests/headless.c $(APP_OBJS) $(MGBA_OBJS)
 	@mkdir -p $(BIN)
 	$(CC) $(CFLAGS) -std=gnu11 -Wall -Isrc -o $@ $^ $(LDLIBS)
-
--include $(wildcard $(OBJDIR)/src/*.d)
 
 clean:
 	rm -rf $(OBJDIR) $(BIN)

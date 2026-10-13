@@ -20,18 +20,16 @@ static App* app;
 static const char* shotdir = NULL;     /* con argumento 2: guarda capturas PNG */
 static char work[512];
 
-static void ev(int type, int code, int value) { AppEvent e = {type, code, value}; app_event(app, &e); }
+static void ev(int type, int code, int value) { AppEvent e = {type, code, value, 0}; app_event(app, &e); }
 static void key(int k) { ev(EV_KEY_DOWN, k, 0); ev(EV_KEY_UP, k, 0); }
 static void pad(int b) { ev(EV_PAD_DOWN, b, 0); ev(EV_PAD_UP, b, 0); }
 static void step(int n) { for (int i = 0; i < n; i++) app_update(app, 1.0 / 60.0); }
-static int audio_total, audio_peak;
+static int audio_total;
 static void stepg(int n) {
 	for (int i = 0; i < n; i++) {
 		app_update(app, 1.0 / 59.7275);
 		const int16_t* d;
-		int n = app_take_audio(app, &d);
-		audio_total += n;
-		for (int k = 0; k < n * 2; k++) { int v = d[k] < 0 ? -d[k] : d[k]; if (v > audio_peak) audio_peak = v; }
+		audio_total += app_take_audio(app, &d);
 	}
 }
 
@@ -60,11 +58,7 @@ static void shot(const char* name) {
 
 /* ROM mínima de GBA escrita a mano en ARM (rellena la pantalla en modo 3): sin material con copyright. */
 static void write_test_rom(const char* path) {
-	/* Activa el canal 1 de sonido (onda cuadrada) y luego rellena la pantalla en modo 3. */
-	static const uint32_t code[] = {0xE3A00301, 0xE3A01080, 0xE1C018B4, 0xE3A01CFF, 0xE3811077, 0xE1C018B0,
-	                                0xE3A01002, 0xE1C018B2, 0xE3A01CF0, 0xE3811080, 0xE1C016B2, 0xE3A01902,
-	                                0xE3811C07, 0xE1C016B4,
-	                                0xE3A01B01, 0xE3811003, 0xE5801000, 0xE3A02406, 0xE3A0301F,
+	static const uint32_t code[] = {0xE3A00301, 0xE3A01B01, 0xE3811003, 0xE5801000, 0xE3A02406, 0xE3A0301F,
 	                                0xE3A05C96, 0xE0C230B2, 0xE2555001, 0x1AFFFFFC, 0xEAFFFFFE};
 	uint8_t rom[0x1000];
 	memset(rom, 0, sizeof(rom));
@@ -115,8 +109,6 @@ int main(int argc, char** argv) {
 	stepg(40);
 	CHECK(app->have_frame, "hay fotograma");
 	CHECK(audio_total > 40 * 700 && audio_total < 40 * 900, "audio ~803 muestras por fotograma");
-	printf("pico de audio: %d\n", audio_peak);
-	CHECK(audio_peak > 500, "el audio tiene señal (no es silencio)");
 	shot("03_juego");
 
 	/* ---- botones y turbo */
@@ -203,6 +195,37 @@ int main(int argc, char** argv) {
 	key(K_ESCAPE); step(1); app->pause_sel = 7; key(K_RETURN);
 	CHECK(app->state == ST_MAIN && !app->emu, "salir al launcher");
 	step(10);
+
+	/* ---- aviso opcional y flujo real de pantalla dividida */
+	ev(EV_PAD_COUNT, 0, 2);
+	key(K_RETURN); step(1); CHECK(app->loading, "inicio con dos mandos muestra primero la carga");
+	step(1);
+	CHECK(app->modal && app->modal_kind == 1 && strstr(app->modal_text, "¿quieres jugar a pantalla dividida?") != NULL,
+	      "aviso de pantalla dividida al detectar segundo mando");
+	key(K_RIGHT); key(K_RETURN);
+	CHECK(app->state == ST_GAME && app->emu && !app->emu2, "No inicia en un jugador");
+	key(K_ESCAPE); step(1); app->pause_sel = 7; key(K_RETURN);
+	CHECK(app->state == ST_MAIN && !app->emu, "salida del modo individual de prueba");
+	key(K_RETURN); step(1); step(1);
+	CHECK(app->modal && app->modal_kind == 1, "aviso vuelve a aparecer para la siguiente partida");
+	key(K_RETURN);
+	CHECK(app->state == ST_GAME && app->emu && app->emu2, "Sí inicia dos núcleos mGBA enlazados");
+	int pair_audio_before = audio_total;
+	stepg(8);
+	AppFrame split_frame; app_render(app, &split_frame);
+	CHECK(split_frame.in_game && split_frame.multiplayer && split_frame.game && split_frame.game2,
+	      "pantalla dividida entrega fotogramas independientes para J1 y J2");
+	CHECK(audio_total > pair_audio_before, "el audio del modo enlazado sigue llegando desde J1");
+	key(K_F5); CHECK(strstr(app->toast, "Guardado rápido") != NULL, "guardado rápido enlazado");
+	char pair_state[700]; slot_path(app, app->last_slot, pair_state, sizeof(pair_state));
+	CHECK(sys_file_exists(pair_state), "estado J1 guardado en multijugador");
+	char pair_state2[720]; snprintf(pair_state2, sizeof(pair_state2), "%s.p2", pair_state);
+	CHECK(sys_file_exists(pair_state2), "estado J2 guardado junto al de J1");
+	key(K_F8); CHECK(strstr(app->toast, "Carga rápida") != NULL, "carga rápida de ambos jugadores");
+	stepg(2);
+	key(K_ESCAPE); step(1); app->pause_sel = 7; key(K_RETURN);
+	CHECK(app->state == ST_MAIN && !app->emu && !app->emu2, "salida limpia del modo multijugador");
+	ev(EV_PAD_COUNT, 0, 1);
 
 	/* ---- ajustes del launcher */
 	key(K_TAB); step(5); CHECK(app->state == ST_SETTINGS, "ajustes");

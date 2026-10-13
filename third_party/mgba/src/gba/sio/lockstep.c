@@ -714,7 +714,12 @@ void _removePlayer(struct GBASIOLockstepCoordinator* coordinator, struct GBASIOL
 	coordinator->transferActive = false;
 
 	TableRemove(&coordinator->players, player->driver->lockstepId);
-	_reconfigPlayers(coordinator);
+	/* No player IDs need reconfiguring after the final local peer detaches. */
+	if (TableSize(&coordinator->players)) {
+		_reconfigPlayers(coordinator);
+	} else {
+		memset(coordinator->attachedPlayers, 0, sizeof(coordinator->attachedPlayers));
+	}
 
 	struct GBASIOLockstepPlayer* runner = TableLookup(&coordinator->players, coordinator->attachedPlayers[0]);
 	if (runner) {

@@ -82,6 +82,7 @@ void app_toast(App* a, const char* fmt, ...) {
 }
 void app_modal(App* a, const char* title, const char* text) {
 	a->modal = 1;
+	a->modal_kind = 0;
 	snprintf(a->modal_title, sizeof(a->modal_title), "%s", title);
 	snprintf(a->modal_text, sizeof(a->modal_text), "%s", text);
 }
@@ -130,6 +131,9 @@ static void set_add(int* s, int* n, int v) { if (!set_has(s, *n, v) && *n < MAXS
 static void set_del(int* s, int* n, int v) { for (int i = 0; i < *n; i++) if (s[i] == v) { s[i] = s[--(*n)]; return; } }
 static void clear_inputs(App* a) {
 	a->nkeys = a->npad = a->nstick = 0;
+	a->p2_npad = a->p2_nstick = 0;
+	a->p2_trig[0] = a->p2_trig[1] = 0;
+	a->p2_stick[0] = a->p2_stick[1] = 0.0f;
 	for (int i = 0; i < 4; i++) a->held_dir[i] = 0;
 	a->stick_dir = -1;
 }
@@ -248,21 +252,31 @@ static void set_cursor(App* a) {
 	if (a->host.set_cursor_visible) a->host.set_cursor_visible(a->host.user, a->state != ST_GAME && !a->input_pad);
 }
 
-static void start_game(App* a, int i) {
-	char stem[128], save[PATH_MAX_APP + 16];
+static void start_game_now(App* a, int i, int multiplayer) {
+	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
 	sys_mkdir_p(a->saves_dir);
 	sys_stem(a->rom_path[i], stem, sizeof(stem));
 	snprintf(save, sizeof(save), "%s/%s.sav", a->saves_dir, stem);
-	a->emu = emu_open(a->rom_path[i], save, sys_file_exists(a->bios_file) ? a->bios_file : NULL,
-	                  a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u);
+	a->emu2 = NULL;
+	if (multiplayer) {
+		snprintf(save2, sizeof(save2), "%s/%s.p2.sav", a->saves_dir, stem);
+		a->emu = emu_open_linked_pair(a->rom_path[i], save, save2,
+		                             sys_file_exists(a->bios_file) ? a->bios_file : NULL,
+		                             a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u,
+		                             &a->emu2);
+	} else {
+		a->emu = emu_open(a->rom_path[i], save, sys_file_exists(a->bios_file) ? a->bios_file : NULL,
+		                  a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u);
+	}
 	if (!a->emu) {
-		app_modal(a, "No se pudo iniciar el juego", "mGBA no pudo abrir la ROM. Comprueba que es una ROM de GBA válida (.gba sin comprimir).");
+		a->emu2 = NULL;
+		app_modal(a, "No se pudo iniciar el juego", multiplayer
+		          ? "mGBA no pudo crear la conexión por cable link. Comprueba que la ROM de GBA sea válida."
+		          : "mGBA no pudo abrir la ROM. Comprueba que es una ROM de GBA válida (.gba sin comprimir).");
 		return;
 	}
 	a->game_idx = i;
-	a->audio_ratio = 1.0;
-	a->audio_fill_avg = 0;
 	a->have_frame = 0;
 	a->audio_frames = 0;
 	a->last_slot = 1;
@@ -271,8 +285,37 @@ static void start_game(App* a, int i) {
 	a->audio_reset = 1;
 	set_cursor(a);
 	char title[160];
-	snprintf(title, sizeof(title), "%s - Sonic Advance Trilogy", GAMES[i].title);
+	snprintf(title, sizeof(title), "%s%s - Sonic Advance Trilogy", GAMES[i].title,
+	         a->emu2 ? " [2 jugadores]" : "");
 	if (a->host.set_title) a->host.set_title(a->host.user, title);
+	if (a->emu2) app_toast(a, "Pantalla dividida: J1 izquierda · J2 derecha");
+}
+
+static void start_game(App* a, int i) {
+	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
+	if (a->pad_count >= 2) {
+		a->modal = 1;
+		a->modal_kind = 1;
+		a->modal_choice = 0;
+		a->prompt_game = i;
+		snprintf(a->modal_title, sizeof(a->modal_title), "Multijugador detectado");
+		snprintf(a->modal_text, sizeof(a->modal_text), "Se ha detectado otro mando más conectado, ¿quieres jugar a pantalla dividida?");
+		return;
+	}
+	start_game_now(a, i, 0);
+}
+
+static void resolve_multiplayer_prompt(App* a, int yes) {
+	int game = a->prompt_game;
+	a->modal = 0;
+	a->modal_kind = 0;
+	if (game < 0 || game >= NUM_GAMES) return;
+	if (yes && a->pad_count >= 2) {
+		start_game_now(a, game, 1);
+	} else {
+		if (yes) app_toast(a, "El segundo mando se desconectó; se iniciará un jugador");
+		start_game_now(a, game, 0);
+	}
 }
 
 static void pause_game(App* a) {
@@ -281,6 +324,7 @@ static void pause_game(App* a) {
 	a->pause_sel = 0;
 	for (int i = 0; i < PAUSE_COUNT; i++) a->pause_anim[i] = 0;
 	emu_set_keys(a->emu, 0);
+	if (a->emu2) emu_set_keys(a->emu2, 0);
 	clear_inputs(a);
 	a->audio_frames = 0;
 	a->audio_reset = 1;
@@ -291,14 +335,31 @@ static void resume_game(App* a) {
 	a->state = ST_GAME;
 	clear_inputs(a);
 	emu_clear_audio(a->emu);
+	if (a->emu2) emu_clear_audio(a->emu2);
 	a->audio_frames = 0;
 	a->audio_reset = 1;
 	set_cursor(a);
 }
 
+static void restart_game(App* a) {
+	int game = a->game_idx;
+	int multiplayer = a->emu2 != NULL;
+	if (a->emu) emu_close(a->emu);
+	a->emu = NULL;
+	a->emu2 = NULL;
+	a->state = ST_MAIN;
+	start_game_now(a, game, multiplayer);
+	if (!a->emu) {
+		a->state = ST_MAIN;
+		set_cursor(a);
+	}
+}
+
 static void exit_game(App* a) {
 	if (a->emu) emu_close(a->emu);
 	a->emu = NULL;
+	a->emu2 = NULL;
+	a->have_frame = 0;
 	a->state = ST_MAIN;
 	for (int n = 1; n <= SLOT_COUNT; n++) { cv_free(a->slot_thumbs[n]); a->slot_thumbs[n] = NULL; }
 	if (a->host.set_title) a->host.set_title(a->host.user, "Sonic Advance Trilogy Launcher");
@@ -319,6 +380,19 @@ static uint32_t keymask(const App* a) {
 		if (GBA_BIT[i] < 0) continue;
 		int k = a->cfg.keys[i];
 		if ((k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[i])) m |= 1u << GBA_BIT[i];
+	}
+	return m;
+}
+static int pressed_id2(const App* a, int id) {
+	if (id < 0) return 0;
+	if (set_has(a->p2_pad_down, a->p2_npad, id) || set_has(a->p2_stick_down, a->p2_nstick, id)) return 1;
+	return (id == PAD_L2 && a->p2_trig[0]) || (id == PAD_R2 && a->p2_trig[1]);
+}
+static uint32_t keymask2(const App* a) {
+	uint32_t m = 0;
+	for (int i = 0; i < ACT_COUNT; i++) {
+		if (GBA_BIT[i] < 0) continue;
+		if (pressed_id2(a, a->cfg.pad[i])) m |= 1u << GBA_BIT[i];
 	}
 	return m;
 }
@@ -442,7 +516,10 @@ static void pause_action(App* a, int act) {
 			else if (a->pause_sel == 1) open_slots(a, 0);
 			else if (a->pause_sel == 2) open_slots(a, 1);
 			else if (a->pause_sel == 5) open_controls(a, 1);
-			else if (a->pause_sel == 6) { emu_reset(a->emu); resume_game(a); }
+			else if (a->pause_sel == 6) {
+				if (a->emu2) restart_game(a);
+				else { emu_reset(a->emu); resume_game(a); }
+			}
 			else if (a->pause_sel == 7) exit_game(a);
 		}
 	}
@@ -478,7 +555,15 @@ static void request_launch_check(App* a) {
 }
 
 static void dispatch(App* a, int act) {
-	if (a->modal) { if (act == A_ACCEPT || act == A_BACK) a->modal = 0; return; }
+	if (a->modal) {
+		if (a->modal_kind == 1) {
+			if (act == A_LEFT || act == A_UP) a->modal_choice = 0;
+			else if (act == A_RIGHT || act == A_DOWN) a->modal_choice = 1;
+			else if (act == A_ACCEPT) resolve_multiplayer_prompt(a, a->modal_choice == 0);
+			else if (act == A_BACK) resolve_multiplayer_prompt(a, 0);
+		} else if (act == A_ACCEPT || act == A_BACK) a->modal = 0;
+		return;
+	}
 	switch (a->state) {
 	case ST_SETTINGS: if (a->settings_page) controls_action(a, act); else settings_action(a, act); break;
 	case ST_PAUSE: pause_action(a, act); break;
@@ -551,7 +636,15 @@ static void on_key_down(App* a, int k, int alt) {
 	else if (act != A_NONE) dispatch(a, act);
 }
 
-static void on_pad_button(App* a, int id, int down) {
+static void on_pad_button(App* a, int id, int down, int player) {
+	if (player == 1) {
+		/* J2 solo controla su núcleo durante una sesión enlazada. No puede pausar
+		 * ni accionar menús del launcher, que siguen perteneciendo a J1. */
+		if (a->state != ST_GAME || !a->emu2) return;
+		if (down) set_add(a->p2_pad_down, &a->p2_npad, id);
+		else set_del(a->p2_pad_down, &a->p2_npad, id);
+		return;
+	}
 	set_pad_mode(a, 1);
 	if (a->capture_kind == 1) {
 		if (down) { assign(a, 1, a->capture_act, id); a->capture_kind = -1; }
@@ -585,8 +678,20 @@ static void on_pad_button(App* a, int id, int down) {
 	}
 }
 
-static void on_pad_axis(App* a, int axis, int value) {
+static void on_pad_axis(App* a, int axis, int value, int player) {
 	float v = value / 32768.0f;
+	if (player == 1) {
+		if (a->state != ST_GAME || !a->emu2) return;
+		if (axis == 0 || axis == 1) {
+			a->p2_stick[axis] = v;
+			a->p2_nstick = 0;
+			if (a->p2_stick[0] < -0.5f) set_add(a->p2_stick_down, &a->p2_nstick, PAD_LEFT);
+			else if (a->p2_stick[0] > 0.5f) set_add(a->p2_stick_down, &a->p2_nstick, PAD_RIGHT);
+			if (a->p2_stick[1] < -0.5f) set_add(a->p2_stick_down, &a->p2_nstick, PAD_UP);
+			else if (a->p2_stick[1] > 0.5f) set_add(a->p2_stick_down, &a->p2_nstick, PAD_DOWN);
+		} else if (axis == 4 || axis == 5) a->p2_trig[axis - 4] = v > 0.5f;
+		return;
+	}
 	if (axis == 0 || axis == 1) {
 		a->stick[axis] = v;
 		if (a->state == ST_GAME) update_game_stick(a); else update_stick(a);
@@ -621,7 +726,13 @@ static void mouse_move(App* a, int x, int y) {
 }
 static void mouse_click(App* a, int x, int y) {
 	if (a->state == ST_GAME) return;
-	if (a->modal) { if (rect_has(ui_modal_ok(), x, y)) a->modal = 0; return; }
+	if (a->modal) {
+		if (a->modal_kind == 1) {
+			if (rect_has(ui_modal_yes(), x, y)) resolve_multiplayer_prompt(a, 1);
+			else if (rect_has(ui_modal_no(), x, y)) resolve_multiplayer_prompt(a, 0);
+		} else if (rect_has(ui_modal_ok(), x, y)) a->modal = 0;
+		return;
+	}
 	if (a->capture_kind >= 0) { a->capture_kind = -1; return; }
 	if (a->state == ST_MAIN) {
 		for (int i = 0; i < NUM_GAMES; i++) if (rect_has(ui_card_rect(a, i), x, y)) {
@@ -651,9 +762,13 @@ void app_event(App* a, const AppEvent* ev) {
 		set_del(a->keys_down, &a->nkeys, ev->code);
 		if (key_action(ev->code) >= A_UP && key_action(ev->code) <= A_RIGHT) release_dir(a, key_action(ev->code));
 		break;
-	case EV_PAD_DOWN: on_pad_button(a, ev->code, 1); break;
-	case EV_PAD_UP: on_pad_button(a, ev->code, 0); break;
-	case EV_PAD_AXIS: on_pad_axis(a, ev->code, ev->value); break;
+	case EV_PAD_DOWN: on_pad_button(a, ev->code, 1, ev->player); break;
+	case EV_PAD_UP: on_pad_button(a, ev->code, 0, ev->player); break;
+	case EV_PAD_AXIS: on_pad_axis(a, ev->code, ev->value, ev->player); break;
+	case EV_PAD_COUNT:
+		a->pad_count = ev->value < 0 ? 0 : ev->value;
+		if (a->pad_count < 2) { a->p2_npad = a->p2_nstick = 0; a->p2_trig[0] = a->p2_trig[1] = 0; }
+		break;
 	case EV_FOCUS_LOST:
 		clear_inputs(a);
 		if (a->state == ST_GAME) pause_game(a);
@@ -687,15 +802,18 @@ int app_update(App* a, double dt) {
 
 	if (a->state == ST_GAME && a->emu) {
 		emu_set_keys(a->emu, keymask(a));
+		if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
 		a->turbo = turbo_active(a);
 		for (int k = 0; k < (a->turbo ? TURBO_FRAMES : 1); k++) {
 			emu_run_frame(a->emu);
+			if (a->emu2) emu_clear_audio(a->emu2); /* Prioridad de audio absoluta para J1 */
 			if (a->turbo) emu_clear_audio(a->emu);
 			else if (a->audio_frames < 16384 - 2048)
 				a->audio_frames += emu_read_audio(a->emu, a->audio + a->audio_frames * 2, 2048);
 			else emu_clear_audio(a->emu);
 		}
 		memcpy(a->frame, emu_video(a->emu), sizeof(a->frame));
+		if (a->emu2) memcpy(a->frame2, emu_video(a->emu2), sizeof(a->frame2));
 		a->have_frame = 1;
 		a->fps_n++;
 		a->fps_acc += dt;
@@ -716,22 +834,6 @@ int app_take_audio(App* a, const int16_t** data) {
 	return n;
 }
 int app_audio_reset_requested(App* a) { int r = a->audio_reset; a->audio_reset = 0; return r; }
-void app_perf_report(App* a, double update_ms, double present_ms) {
-	a->perf_update += (update_ms - a->perf_update) * 0.1;      /* media suavizada */
-	a->perf_present += (present_ms - a->perf_present) * 0.1;
-}
-
-void app_audio_feedback(App* a, int queued_frames) {
-	if (!a->emu || a->state != ST_GAME || a->host.audio_rate <= 0) return;
-	double target = a->host.audio_rate * 0.040;                       /* ~40 ms de cola */
-	if (a->audio_fill_avg <= 0) a->audio_fill_avg = target;
-	a->audio_fill_avg += (queued_frames - a->audio_fill_avg) * 0.02;  /* cola media: ignora los saltos por bloques */
-	double err = (target - a->audio_fill_avg) / target;               /* >0: falta audio, <0: sobra */
-	err = err < -1.0 ? -1.0 : (err > 1.0 ? 1.0 : err);
-	double want = 1.0 + 0.02 * err;                                   /* máx. ±2 % (solo ante desvíos grandes) */
-	a->audio_ratio += (want - a->audio_ratio) * 0.02;                 /* cambio lento: sin vibrato audible */
-	emu_set_audio_rate(a->emu, a->host.audio_rate * a->audio_ratio);
-}
 int app_debug_state(const App* a) { return (int) a->state; }
 
 /* ---------------------------------------------------------------- crear / destruir */
@@ -757,6 +859,7 @@ App* app_create(const char* base_dir, const AppHost* host) {
 
 	app_load_config(a);
 	a->pending_launch = -1;
+	a->prompt_game = -1;
 	a->capture_kind = -1;
 	a->stick_dir = -1;
 	a->delete_slot = -1;
@@ -765,8 +868,6 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	for (int i = 0; i < NUM_GAMES; i++) a->anim[i] = i == 0 ? 1.0f : 0.0f;
 	app_scan_roms(a);
 	a->ui = cv_new(UI_W, UI_H);
-	a->hud_fps = cv_new(HUD_FPS_W, HUD_FPS_H);
-	a->hud_toast = cv_new(HUD_TOAST_W, HUD_TOAST_H);
 	ui_load_assets(a);
 	if (a->cfg.fullscreen && a->host.set_fullscreen) a->host.set_fullscreen(a->host.user, 1);
 	return a;
@@ -775,10 +876,9 @@ App* app_create(const char* base_dir, const AppHost* host) {
 void app_destroy(App* a) {
 	if (!a) return;
 	if (a->emu) emu_close(a->emu);
+	a->emu = a->emu2 = NULL;
 	for (int n = 1; n <= SLOT_COUNT; n++) cv_free(a->slot_thumbs[n]);
 	ui_free_assets(a);
 	cv_free(a->ui);
-	cv_free(a->hud_fps);
-	cv_free(a->hud_toast);
 	free(a);
 }

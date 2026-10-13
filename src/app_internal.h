@@ -39,6 +39,7 @@ struct App {
 	int settings_page;               /* 0 ajustes, 1 controles */
 	int set_sel, controls_from_pause, ctrl_row, ctrl_col;
 	int capture_kind, capture_act;   /* capture_kind: -1 ninguno, 0 teclado, 1 mando */
+	int modal_kind, modal_choice, prompt_game; /* 1 = confirmación de pantalla dividida */
 	int pause_sel; float pause_anim[PAUSE_COUNT];
 	int slot_mode, slot_sel, last_slot; /* slot_mode: 0 guardar, 1 cargar */
 	Canvas* slot_thumbs[SLOT_COUNT + 1];
@@ -55,19 +56,19 @@ struct App {
 	float stick[2]; int stick_dir;
 	int trig[2];
 	int keys_down[MAXSET], nkeys, pad_down[MAXSET], npad, stick_down[4], nstick;
+	int pad_count;
+	int p2_pad_down[MAXSET], p2_npad, p2_stick_down[4], p2_nstick;
+	float p2_stick[2]; int p2_trig[2];
 
 	/* juego */
-	Emu* emu; int game_idx;
-	uint32_t frame[EMU_W * EMU_H]; int have_frame;
+	Emu* emu; Emu* emu2; int game_idx;
+	uint32_t frame[EMU_W * EMU_H], frame2[EMU_W * EMU_H]; int have_frame;
 	int16_t audio[16384 * 2]; int audio_frames; int16_t audio_out[16384 * 2];
 	int audio_reset; int turbo;
-	double audio_ratio;              /* factor aplicado a la frecuencia de salida (control dinámico) */
-	double audio_fill_avg;           /* cola de audio media (fotogramas), filtrada */
 	double fps, fps_acc; int fps_n;
 
 	/* recursos */
-	Canvas *icon, *title, *bg_base, *ui, *hud_fps, *hud_toast;
-	double perf_update, perf_present;
+	Canvas *icon, *title, *bg_base, *ui;
 	Canvas *cards[NUM_GAMES], *cards_dark[NUM_GAMES], *backdrops[NUM_GAMES];
 };
 
@@ -101,5 +102,7 @@ Rect ui_ctrl_cell_rect(int k, int col);
 Rect ui_pause_rect(int i);
 Rect ui_slot_rect(int n);
 Rect ui_modal_ok(void);
+Rect ui_modal_yes(void);
+Rect ui_modal_no(void);
 
 #endif
