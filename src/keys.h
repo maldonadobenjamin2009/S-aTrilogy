@@ -27,6 +27,7 @@
 #define PAD_SHARE 4
 #define PAD_PS 5
 #define PAD_OPTIONS 6
+#define PAD_TOUCHPAD 20
 #define PAD_L1 9
 #define PAD_R1 10
 #define PAD_UP 11

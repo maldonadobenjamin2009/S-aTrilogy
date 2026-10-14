@@ -89,8 +89,17 @@ int main(int argc, char** argv) {
 	AppHost host = {0};
 	host.open_folder = h_open; host.set_fullscreen = h_fs; host.set_title = h_title; host.set_cursor_visible = h_cursor;
 	host.audio_rate = 48000; host.has_audio = 1;
+	/* Verifica la migración del mapeo antiguo de pausa (PS/Guide) al clic del touchpad. */
+	snprintf(path, sizeof(path), "%s/legacy-config.txt", work);
+	FILE* legacy = fopen(path, "w");
+	if (legacy) { fputs("pad_PAUSE=5\n", legacy); fclose(legacy); }
+	Config legacy_cfg; config_defaults(&legacy_cfg); config_load(&legacy_cfg, path);
+	CHECK(legacy_cfg.pad[ACT_PAUSE] == PAD_TOUCHPAD, "configuración antigua migra pausa a panel táctil");
+	sys_remove(path);
+
 	app = app_create(work, &host);
 	CHECK(app != NULL, "app_create");
+	CHECK(app->cfg.pad[ACT_PAUSE] == PAD_TOUCHPAD, "panel táctil como pausa predeterminada");
 	printf("mGBA %s | roms: %d %d %d\n", emu_version(), app->rom_found[0], app->rom_found[1], app->rom_found[2]);
 	CHECK(app->rom_found[0] && !app->rom_found[1] && !app->rom_found[2], "detección de ROMs (sin distinguir mayúsculas)");
 
@@ -196,16 +205,16 @@ int main(int argc, char** argv) {
 	Config c2; config_defaults(&c2); config_load(&c2, app->cfg_path);
 	CHECK(c2.keys[ACT_A] == 'x' && c2.volume == app->cfg.volume, "config.txt guardado");
 
-	/* ---- mando PS4 */
-	pad(PAD_PS); CHECK(app->state == ST_GAME, "botón PS reanuda");
-	stepg(2); pad(PAD_PS); CHECK(app->state == ST_PAUSE, "botón PS pausa");
+	/* ---- mando PS4: el clic del panel táctil abre/cierra la pausa */
+	pad(PAD_TOUCHPAD); CHECK(app->state == ST_GAME, "panel táctil reanuda");
+	stepg(2); pad(PAD_TOUCHPAD); CHECK(app->state == ST_PAUSE, "panel táctil pausa");
 	pad(PAD_CIRCLE); CHECK(app->state == ST_GAME, "círculo continúa");
 	ev(EV_PAD_DOWN, PAD_CIRCLE, 0); ev(EV_PAD_DOWN, PAD_LEFT, 0); stepg(1);
 	ev(EV_PAD_UP, PAD_CIRCLE, 0); ev(EV_PAD_UP, PAD_LEFT, 0);
 	ev(EV_PAD_AXIS, 5, 30000); stepg(1); CHECK(app->turbo, "R2 = turbo");
 	ev(EV_PAD_AXIS, 5, 0); stepg(1); CHECK(!app->turbo, "R2 suelto");
 	ev(EV_FOCUS_LOST, 0, 0); CHECK(app->state == ST_PAUSE, "pérdida de foco = pausa");
-	pad(PAD_PS); stepg(2);
+	pad(PAD_TOUCHPAD); stepg(2);
 	key(K_F5); CHECK(strstr(app->toast, "Guardado rápido") != NULL, "guardado rápido");
 	key(K_F8); CHECK(strstr(app->toast, "Carga rápida") != NULL, "carga rápida");
 
