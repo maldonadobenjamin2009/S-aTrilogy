@@ -56,18 +56,30 @@ jobs:
             find "$TOOLS" -maxdepth 1 -type f -exec chmod u+x {} +
           fi
 
+          # The container may have an old system Go (e.g. Go 1.13), which does
+          # not support the -modfile flag. create-fself and create-gp4 are both
+          # built in this step, so always put a pinned Go toolchain first on PATH.
+          GO_VERSION="1.22.12"
+          GO_ROOT="/tmp/go-${GO_VERSION}"
+          if [ ! -x "$GO_ROOT/bin/go" ]; then
+            echo "Installing pinned Go ${GO_VERSION} for OpenOrbis build helpers"
+            curl -fsSL --retry 3 --retry-delay 2 \
+              "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" \
+              -o "/tmp/go${GO_VERSION}.linux-amd64.tar.gz"
+            mkdir -p "$GO_ROOT"
+            tar -xzf "/tmp/go${GO_VERSION}.linux-amd64.tar.gz" \
+              -C "$GO_ROOT" --strip-components=1
+            rm -f "/tmp/go${GO_VERSION}.linux-amd64.tar.gz"
+          fi
+          export PATH="$GO_ROOT/bin:$PATH"
+          export GOTOOLCHAIN=local
+          echo "Using $(go version) from $(command -v go)"
+
           # The container's SDK release may omit create-fself. Build the official
           # upstream v1.3 source as a deterministic fallback rather than failing
           # immediately at the preflight check.
           if [ ! -f "$TOOLS/create-fself" ]; then
             echo "create-fself is absent; building official OpenOrbis/create-fself v1.3"
-            if ! command -v go >/dev/null 2>&1; then
-              GO_VERSION="1.22.12"
-              curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go-linux-amd64.tar.gz
-              rm -rf /usr/local/go
-              tar -xzf /tmp/go-linux-amd64.tar.gz -C /usr/local
-              export PATH="/usr/local/go/bin:$PATH"
-            fi
             TMP_FSELF="$(mktemp -d)"
             git clone --depth 1 --branch v1.3 https://github.com/OpenOrbis/create-fself.git "$TMP_FSELF/create-fself"
             (
