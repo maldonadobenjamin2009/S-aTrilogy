@@ -35,26 +35,27 @@ jobs:
           lfs: true
           fetch-depth: 1
 
-      - name: Checkout matching OpenOrbis sample packaging files
-        uses: actions/checkout@v4
-        with:
-          repository: OpenOrbis/OpenOrbis-PS4-Toolchain
-          ref: v0.5.4
-          path: _openorbis-source
-          fetch-depth: 1
-
-      - name: Prepare OpenOrbis SDL2 sample package support files
+      - name: Verify OpenOrbis package tools and runtime modules
         shell: bash
         run: |
           set -euo pipefail
           : "${OO_PS4_TOOLCHAIN:?OpenOrbis container did not set OO_PS4_TOOLCHAIN}"
-          mkdir -p "$OO_PS4_TOOLCHAIN/samples/SDL2"
-          cp -a _openorbis-source/samples/SDL2/. "$OO_PS4_TOOLCHAIN/samples/SDL2/"
-          test -f "$OO_PS4_TOOLCHAIN/samples/SDL2/sce_sys/about/right.prx"
-          test -d "$OO_PS4_TOOLCHAIN/samples/SDL2/sce_module"
-          test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"
-          test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-gp4"
-          test -x "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
+          for tool in create-fself create-gp4 PkgTool.Core; do
+            if [ ! -x "$OO_PS4_TOOLCHAIN/bin/linux/$tool" ]; then
+              echo "::error::OpenOrbis tool not found or not executable: $OO_PS4_TOOLCHAIN/bin/linux/$tool"
+              exit 1
+            fi
+          done
+          # The official Docker image installs SDK files, not the sample tree.
+          # Runtime modules are shipped under bin/data/modules in the SDK release.
+          for module in libc.prx libSceFios2.prx; do
+            if [ ! -f "$OO_PS4_TOOLCHAIN/bin/data/modules/$module" ]; then
+              echo "::error::Required OpenOrbis runtime module is missing: $OO_PS4_TOOLCHAIN/bin/data/modules/$module"
+              exit 1
+            fi
+          done
+          echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
+          ls -l "$OO_PS4_TOOLCHAIN/bin/data/modules/libc.prx" "$OO_PS4_TOOLCHAIN/bin/data/modules/libSceFios2.prx"
 
       - name: Check package inputs
         shell: bash

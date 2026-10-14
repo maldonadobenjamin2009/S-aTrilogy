@@ -19,13 +19,25 @@ cp -a dist/main/. "$STAGE/main/"
 cp -a dist/assets/. "$STAGE/assets/"
 cp ps4/sce_sys/icon0.png "$STAGE/sce_sys/icon0.png"
 
-SAMPLE="$SDK/samples/SDL2"
-if [ ! -d "$SAMPLE/sce_module" ] || [ ! -f "$SAMPLE/sce_sys/about/right.prx" ]; then
-  echo "ERROR: el toolchain no contiene samples/SDL2 con módulos de soporte" >&2
-  exit 1
+# The official OpenOrbis Docker image intentionally omits the samples tree.
+# Copy the required runtime modules directly from the installed SDK instead of
+# requiring generated/binary sample files that are not tracked in its source repo.
+MODULE_DIR="$SDK/bin/data/modules"
+for module in libc.prx libSceFios2.prx; do
+  if [ ! -f "$MODULE_DIR/$module" ]; then
+    echo "ERROR: falta el módulo requerido de OpenOrbis: $MODULE_DIR/$module" >&2
+    exit 1
+  fi
+  cp "$MODULE_DIR/$module" "$STAGE/sce_module/$module"
+done
+
+# right.prx is optional package metadata from the sample tree. Include it only
+# when supplied by the project or a full local SDK/sample installation.
+if [ -f "ps4/sce_sys/about/right.prx" ]; then
+  cp "ps4/sce_sys/about/right.prx" "$STAGE/sce_sys/about/right.prx"
+elif [ -f "$SDK/samples/SDL2/sce_sys/about/right.prx" ]; then
+  cp "$SDK/samples/SDL2/sce_sys/about/right.prx" "$STAGE/sce_sys/about/right.prx"
 fi
-cp -a "$SAMPLE/sce_module/." "$STAGE/sce_module/"
-cp "$SAMPLE/sce_sys/about/right.prx" "$STAGE/sce_sys/about/right.prx"
 
 # Convert ELF to the executable format used by PS4 homebrew packages.
 (
