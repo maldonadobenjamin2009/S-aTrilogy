@@ -205,11 +205,23 @@ static void draw_toggle(Canvas* c, Rect rect, int on) {
 	T(c, on ? "SÍ" : "NO", on ? r.x + 30 : r.x + r.w - 30, r.y + 22, 20, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
 }
 
+static void draw_slider_arrow(Canvas* c, int cx, int cy, int dir, uint32_t color) {
+	/* Flecha vectorial para que quede nítida a cualquier escala. */
+	float tip = (float) cx + dir * 11.0f;
+	gfx_line(c, cx - dir * 8.0f, cy, tip, cy, 4.0f, color);
+	gfx_line(c, tip, cy, tip - dir * 7.0f, cy - 7.0f, 4.0f, color);
+	gfx_line(c, tip, cy, tip - dir * 7.0f, cy + 7.0f, 4.0f, color);
+}
+
 static void draw_slider(Canvas* c, Rect rect, int value, uint32_t on_col) {
 	int seg_w = 20, gap = 6, h = 30, total = 10 * seg_w + 9 * gap;
 	int x0 = rect.x + rect.w - total - 130, y0 = rect.y + rect.h / 2 - h / 2;
 	for (int i = 0; i < 10; i++)
 		gfx_rrect(c, rect_make(x0 + i * (seg_w + gap), y0, seg_w, h), 4, value >= (i + 1) * 10 ? on_col : RGB(70, 74, 90));
+	/* Flecha izquierda = bajar volumen; derecha = subirlo. Las mismas zonas
+	 * son táctiles en la pausa de Android. */
+	draw_slider_arrow(c, x0 - 24, y0 + h / 2, -1, on_col);
+	draw_slider_arrow(c, x0 + total + 24, y0 + h / 2, 1, on_col);
 	char buf[16];
 	snprintf(buf, sizeof(buf), "%d%%", value);
 	T(c, buf, rect.x + rect.w - 24, rect.y + rect.h / 2, 26, on_col == C_DARK ? C_DARK : C_WHITE, TX_BOLD | TX_RIGHT | TX_VMID);

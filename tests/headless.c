@@ -127,6 +127,25 @@ int main(int argc, char** argv) {
 	int v0 = app->cfg.volume;
 	key(K_RIGHT); CHECK(app->cfg.volume == v0 + 10, "volumen +10");
 	key(K_LEFT); key(K_LEFT); CHECK(app->cfg.volume == v0 - 10, "volumen -10");
+	Rect volume_row = ui_pause_rect(3);
+	int volume_total = 10 * 20 + 9 * 6;
+	int volume_x = volume_row.x + (volume_row.w + 28 - 10) - volume_total - 130;
+	int volume_y = volume_row.y + volume_row.h / 2;
+	CHECK(app_pause_volume_arrow_hit(app, volume_x - 24, volume_y) == -10, "flecha izquierda del volumen detectada");
+	CHECK(app_pause_volume_arrow_hit(app, volume_x + volume_total + 24, volume_y) == 10, "flecha derecha del volumen detectada");
+	int arrow_v = app->cfg.volume;
+	ev(EV_TOUCH_VOLUME, 0, -10); CHECK(app->cfg.volume == arrow_v - 10, "flecha táctil baja volumen");
+	ev(EV_TOUCH_VOLUME, 0, 10); CHECK(app->cfg.volume == arrow_v, "flecha táctil sube volumen");
+	/* En pausa, palanca = navegación y A/B = confirmar/volver. */
+	app->pause_sel = 0;
+	ev(EV_TOUCH_DOWN, ACT_DOWN, 0); ev(EV_TOUCH_UP, ACT_DOWN, 0);
+	CHECK(app->pause_sel == 1, "palanca táctil mueve selección de pausa");
+	ev(EV_TOUCH_DOWN, ACT_B, 0); CHECK(app->state == ST_GAME, "B táctil vuelve al juego desde pausa");
+	ev(EV_TOUCH_DOWN, ACT_PAUSE, 0); CHECK(app->state == ST_PAUSE, "pausa táctil vuelve a abrir el menú");
+	app->pause_sel = 1;
+	ev(EV_TOUCH_DOWN, ACT_A, 0); CHECK(app->state == ST_SLOTS, "A táctil confirma una opción del menú de pausa");
+	ev(EV_TOUCH_DOWN, ACT_B, 0); CHECK(app->state == ST_PAUSE, "B táctil vuelve de ranuras a pausa");
+	app->pause_sel = 3; /* deja el flujo posterior en la misma selección que el test original */
 	step(20); shot("06_pausa_volumen");
 	key(K_DOWN); fullscreen_calls = 0; key(K_RETURN);
 	CHECK(app->cfg.fullscreen == 1 && fullscreen_calls == 1 && last_fs == 1, "pantalla completa desde la pausa");

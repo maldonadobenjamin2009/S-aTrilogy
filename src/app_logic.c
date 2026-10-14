@@ -775,6 +775,18 @@ static void mouse_click(App* a, int x, int y) {
 	if (hit) dispatch(a, A_ACCEPT);
 }
 
+static int touch_menu_action(int code) {
+	switch (code) {
+	case ACT_UP: return A_UP;
+	case ACT_DOWN: return A_DOWN;
+	case ACT_LEFT: return A_LEFT;
+	case ACT_RIGHT: return A_RIGHT;
+	case ACT_A: return A_ACCEPT;
+	case ACT_B: case ACT_PAUSE: return A_BACK;
+	default: return A_NONE;
+	}
+}
+
 void app_event(App* a, const AppEvent* ev) {
 	switch (ev->type) {
 	case EV_QUIT: a->quit = 1; break;
@@ -787,14 +799,33 @@ void app_event(App* a, const AppEvent* ev) {
 	case EV_PAD_UP: on_pad_button(a, ev->code, 0, ev->player); break;
 	case EV_PAD_AXIS: on_pad_axis(a, ev->code, ev->value, ev->player); break;
 	case EV_TOUCH_DOWN:
-		if (ev->code < 0 || ev->code >= ACT_COUNT || a->state != ST_GAME) break;
-		if (ev->code == ACT_PAUSE) pause_game(a);
-		else if (ev->code == ACT_QSAVE) quick_save(a);
-		else if (ev->code == ACT_QLOAD) quick_load(a);
-		else a->touch_down[ev->code] = 1;
+		if (ev->code < 0 || ev->code >= ACT_COUNT) break;
+		if (a->state == ST_GAME) {
+			if (ev->code == ACT_PAUSE) pause_game(a);
+			else if (ev->code == ACT_QSAVE) quick_save(a);
+			else if (ev->code == ACT_QLOAD) quick_load(a);
+			else a->touch_down[ev->code] = 1;
+		} else {
+			/* En pausa/ranuras, la palanca navega y A/B confirman o vuelven. */
+			int act = touch_menu_action(ev->code);
+			if (act >= A_UP && act <= A_RIGHT) press_dir(a, act);
+			else if (act != A_NONE) dispatch(a, act);
+		}
 		break;
 	case EV_TOUCH_UP:
-		if (ev->code >= 0 && ev->code < ACT_COUNT) a->touch_down[ev->code] = 0;
+		if (ev->code >= 0 && ev->code < ACT_COUNT) {
+			if (ev->code >= ACT_UP && ev->code <= ACT_RIGHT) {
+				int act = touch_menu_action(ev->code);
+				if (act >= A_UP && act <= A_RIGHT) release_dir(a, act);
+			}
+			a->touch_down[ev->code] = 0;
+		}
+		break;
+	case EV_TOUCH_VOLUME:
+		if (a->state == ST_PAUSE && !a->modal) {
+			a->pause_sel = 3;
+			adjust_volume(a, ev->value);
+		}
 		break;
 	case EV_PAD_COUNT:
 		a->pad_count = ev->value < 0 ? 0 : ev->value;
@@ -886,6 +917,23 @@ void app_audio_feedback(App* a, int queued_frames) {
 }
 
 int app_debug_state(const App* a) { return (int) a->state; }
+
+int app_is_paused(const App* a) { return a && a->emu && a->state == ST_PAUSE; }
+int app_touch_menu_active(const App* a) { return a && a->emu && a->state != ST_GAME; }
+
+/* Geometría en coordenadas UI (1920x1080), en la misma posición que las flechas
+ * que app_ui.c dibuja en el deslizador de volumen del menú de pausa. */
+int app_pause_volume_arrow_hit(const App* a, int ui_x, int ui_y) {
+	if (!a || !a->emu || a->state != ST_PAUSE || a->modal) return 0;
+	Rect row = ui_pause_rect(3);
+	int total = 10 * 20 + 9 * 6;
+	int slider_x = row.x + (row.w + 28 - 10) - total - 130;
+	int cy = row.y + row.h / 2;
+	if (abs(ui_y - cy) > 30) return 0;
+	if (abs(ui_x - (slider_x - 24)) <= 25) return -10;
+	if (abs(ui_x - (slider_x + total + 24)) <= 25) return 10;
+	return 0;
+}
 
 /* ---------------------------------------------------------------- crear / destruir */
 App* app_create(const char* base_dir, const AppHost* host) {

@@ -26,8 +26,9 @@
 typedef struct {
 	SDL_FingerID id;
 	int active;
-	int kind;             /* 1 = botón de mando, 2 = pausa, 3 = menú */
+	int kind;             /* 1 = botón, 2 = palanca, 3 = menú, 4 = flecha de volumen */
 	int code;
+	int code2;            /* segunda dirección si la palanca está en diagonal */
 } TouchPoint;
 #endif
 
@@ -42,7 +43,9 @@ typedef struct {
 	int last_in_game;
 	TouchPoint touches[16];
 	SDL_Texture* tex_touch;
-	int touch_w, touch_h, touch_target_failed;
+	int touch_w, touch_h, touch_target_failed, touch_menu_overlay;
+	SDL_FingerID stick_finger;
+	float stick_visual_x, stick_visual_y; /* desplazamiento de la palanca, -1..1 */
 #endif
 } Plat;
 
@@ -135,64 +138,100 @@ static void ui_dest(int ow, int oh, SDL_Rect* d) {
 
 #if defined(__ANDROID__)
 /* Controles táctiles nativos de la compilación Android. Todos emiten los mismos
- * eventos de mando que un GameController, por lo que respetan el mapa de controles. */
-enum { TOUCH_ACTION = 1, TOUCH_MENU = 3 };
+ * eventos que un GameController; la cruceta se presenta como palanca analógica. */
+enum { TOUCH_ACTION = 1, TOUCH_STICK = 2, TOUCH_MENU = 3, TOUCH_VOLUME = 4 };
 
-typedef struct { int kind, code; } TouchHit;
+typedef struct { int kind, code, code2; } TouchHit;
 static void send_app_event_j1(App* app, int type, int code, int value);
 static void send_player(App* app, int type, int code, int value, int player);
 static void mouse_to_ui(int wx, int wy, int* ux, int* uy);
 static void touch_release_all(App* app);
 
-static void touch_geometry(int w, int h, int *mini, int *dpad_r, int *button_r, int *shoulder_r) {
+static void touch_geometry(int w, int h, int *mini, int *stick_r, int *button_r, int *shoulder_r) {
 	*mini = w < h ? w : h;
-	*dpad_r = (int) (*mini * 0.135f);
+	*stick_r = (int) (*mini * 0.135f);
 	*button_r = (int) (*mini * 0.070f);
 	*shoulder_r = (int) (*mini * 0.055f);
 }
 
-static TouchHit touch_hit(int x, int y, int w, int h) {
-	int mini, dr, br, sr;
-	touch_geometry(w, h, &mini, &dr, &br, &sr);
-	TouchHit none = {0, 0};
+/* Calcula una entrada digital GBA a partir del vector de la palanca. En la zona
+ * diagonal se envían dos direcciones para permitir saltos/movimientos diagonales. */
+static TouchHit touch_stick_value(App* app, int x, int y, int w, int h) {
+	int mini, sr, br, shr;
+	touch_geometry(w, h, &mini, &sr, &br, &shr);
+	(void) br; (void) shr;
+	int cx = (int)(w * (app_touch_menu_active(app) ? 0.62f : 0.16f));
+	int cy = (int)(h * 0.735f);
+	int dx = x - cx, dy = y - cy;
+	TouchHit z = {TOUCH_STICK, -1, -1};
+	int dead = (int)(sr * 0.18f);
+	if (dx * dx + dy * dy <= dead * dead) return z;
+	int ax = abs(dx), ay = abs(dy);
+	int xcode = dx < 0 ? ACT_LEFT : ACT_RIGHT;
+	int ycode = dy < 0 ? ACT_UP : ACT_DOWN;
+	if (ax > 0 && ay > 0 && ax * 100 >= ay * 42 && ay * 100 >= ax * 42) {
+		z.code = ycode;
+		z.code2 = xcode;
+	} else if (ax >= ay) z.code = xcode;
+	else z.code = ycode;
+	return z;
+}
+
+static TouchHit touch_hit(App* app, int x, int y, int w, int h) {
+	int mini, sr, br, shr;
+	touch_geometry(w, h, &mini, &sr, &br, &shr);
+	TouchHit none = {0, -1, -1};
 	/* Pausa arriba, centrada. */
 	int cx = w / 2, cy = (int) (h * 0.095f);
 	int dx = x - cx, dy = y - cy;
 	int pr = (int) (mini * 0.060f);
-	if (dx * dx + dy * dy <= pr * pr) { TouchHit z = {TOUCH_ACTION, ACT_PAUSE}; return z; }
+	if (dx * dx + dy * dy <= pr * pr) { TouchHit z = {TOUCH_ACTION, ACT_PAUSE, -1}; return z; }
 	/* L y R en las esquinas superiores. */
 	cx = (int) (w * 0.085f); cy = (int) (h * 0.105f);
 	dx = x - cx; dy = y - cy;
-	if (dx * dx + dy * dy <= sr * sr) { TouchHit z = {TOUCH_ACTION, ACT_L}; return z; }
+	if (dx * dx + dy * dy <= shr * shr) { TouchHit z = {TOUCH_ACTION, ACT_L, -1}; return z; }
 	cx = (int) (w * 0.915f); cy = (int) (h * 0.105f);
 	dx = x - cx; dy = y - cy;
-	if (dx * dx + dy * dy <= sr * sr) { TouchHit z = {TOUCH_ACTION, ACT_R}; return z; }
-	/* Cruceta izquierda: una dirección por contacto, con selección dominante. */
-	cx = (int) (w * 0.16f); cy = (int) (h * 0.735f);
+	if (dx * dx + dy * dy <= shr * shr) { TouchHit z = {TOUCH_ACTION, ACT_R, -1}; return z; }
+	/* Área de la palanca: se conserva el mismo centro que el dibujo. */
+	cx = (int) (w * (app_touch_menu_active(app) ? 0.62f : 0.16f)); cy = (int) (h * 0.735f);
 	dx = x - cx; dy = y - cy;
-	if (abs(dx) <= (int)(dr * 1.10f) && abs(dy) <= (int)(dr * 1.10f)) {
-		if (abs(dx) > abs(dy)) { TouchHit z = {TOUCH_ACTION, dx < 0 ? ACT_LEFT : ACT_RIGHT}; return z; }
-		if (dy != 0) { TouchHit z = {TOUCH_ACTION, dy < 0 ? ACT_UP : ACT_DOWN}; return z; }
-	}
-	/* Botones A (derecha) y B (izquierda). A/B siguen el mapeo predeterminado
-	 * de mGBA: círculo -> A y cruz -> B. */
+	int stick_hit_r = (int)(sr * 1.08f);
+	if (dx * dx + dy * dy <= stick_hit_r * stick_hit_r) return touch_stick_value(app, x, y, w, h);
+	/* Botones A y B. */
 	cx = (int) (w * 0.865f); cy = (int) (h * 0.745f);
 	dx = x - cx; dy = y - cy;
-	if (dx * dx + dy * dy <= br * br) { TouchHit z = {TOUCH_ACTION, ACT_A}; return z; }
+	if (dx * dx + dy * dy <= br * br) { TouchHit z = {TOUCH_ACTION, ACT_A, -1}; return z; }
 	cx = (int) (w * 0.755f); cy = (int) (h * 0.795f);
 	dx = x - cx; dy = y - cy;
-	if (dx * dx + dy * dy <= br * br) { TouchHit z = {TOUCH_ACTION, ACT_B}; return z; }
+	if (dx * dx + dy * dy <= br * br) { TouchHit z = {TOUCH_ACTION, ACT_B, -1}; return z; }
 	/* Select/Start centrados abajo, en dos superficies tipo pastilla. */
 	int small_r = (int)(mini * 0.050f), btn_y = (int)(h * 0.925f);
 	int select_x = (int)(w * 0.455f), start_x = (int)(w * 0.545f);
-	if (abs(x - select_x) <= small_r * 2 && abs(y - btn_y) <= small_r) { TouchHit z = {TOUCH_ACTION, ACT_SELECT}; return z; }
-	if (abs(x - start_x) <= small_r * 2 && abs(y - btn_y) <= small_r) { TouchHit z = {TOUCH_ACTION, ACT_START}; return z; }
+	if (abs(x - select_x) <= small_r * 2 && abs(y - btn_y) <= small_r) { TouchHit z = {TOUCH_ACTION, ACT_SELECT, -1}; return z; }
+	if (abs(x - start_x) <= small_r * 2 && abs(y - btn_y) <= small_r) { TouchHit z = {TOUCH_ACTION, ACT_START, -1}; return z; }
 	return none;
 }
 
 static void touch_send_hit(App* app, const TouchHit* hit, int down) {
-	if (!hit || !hit->kind) return;
-	if (hit->kind == TOUCH_ACTION) send_app_event_j1(app, down ? EV_TOUCH_DOWN : EV_TOUCH_UP, hit->code, 0);
+	if (!hit || (hit->kind != TOUCH_ACTION && hit->kind != TOUCH_STICK)) return;
+	if (hit->code >= 0) send_app_event_j1(app, down ? EV_TOUCH_DOWN : EV_TOUCH_UP, hit->code, 0);
+	if (hit->code2 >= 0 && hit->code2 != hit->code)
+		send_app_event_j1(app, down ? EV_TOUCH_DOWN : EV_TOUCH_UP, hit->code2, 0);
+}
+
+static void touch_update_stick_visual(App* app, int x, int y, int w, int h) {
+	int mini, sr, br, shr;
+	touch_geometry(w, h, &mini, &sr, &br, &shr);
+	(void) mini; (void) br; (void) shr;
+	int cx = (int)(w * (app_touch_menu_active(app) ? 0.62f : 0.16f));
+	int cy = (int)(h * 0.735f);
+	float maxr = sr * 0.62f;
+	float dx = (float)(x - cx), dy = (float)(y - cy);
+	float len = sqrtf(dx * dx + dy * dy);
+	if (len > maxr && len > 0.0f) { dx *= maxr / len; dy *= maxr / len; }
+	P.stick_visual_x = maxr > 0 ? dx / maxr : 0.0f;
+	P.stick_visual_y = maxr > 0 ? dy / maxr : 0.0f;
 }
 
 static TouchPoint* touch_find(SDL_FingerID id, int create) {
@@ -205,6 +244,7 @@ static TouchPoint* touch_find(SDL_FingerID id, int create) {
 		memset(free_slot, 0, sizeof(*free_slot));
 		free_slot->active = 1;
 		free_slot->id = id;
+		free_slot->code = free_slot->code2 = -1;
 		return free_slot;
 	}
 	return NULL;
@@ -216,39 +256,52 @@ static void touch_event_down(App* app, SDL_TouchFingerEvent* ev) {
 	SDL_GetRendererOutputSize(P.ren, &ow, &oh);
 	int wx = (int)(ev->x * (ww > 0 ? ww : ow));
 	int wy = (int)(ev->y * (wh > 0 ? wh : oh));
+	int ux = 0, uy = 0;
+	mouse_to_ui(wx, wy, &ux, &uy);
 	TouchPoint* tp = touch_find(ev->fingerId, 1);
 	if (!tp) return;
 	if (P.last_in_game) {
-		TouchHit hit = touch_hit((int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
+		/* Flechas del volumen en pausa; pueden usarse con el dedo directamente. */
+		int volume_delta = app_pause_volume_arrow_hit(app, ux, uy);
+		if (volume_delta) {
+			tp->kind = TOUCH_VOLUME; tp->code = volume_delta; tp->code2 = -1;
+			send_app_event_j1(app, EV_TOUCH_VOLUME, 0, volume_delta);
+			return;
+		}
+		TouchHit hit = touch_hit(app, (int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
 		if (hit.kind == TOUCH_ACTION && hit.code == ACT_PAUSE) {
 			touch_release_all(app);
 			tp = touch_find(ev->fingerId, 1);
 			if (!tp) return;
 		}
-		tp->kind = hit.kind; tp->code = hit.code;
+		tp->kind = hit.kind; tp->code = hit.code; tp->code2 = hit.code2;
+		if (hit.kind == TOUCH_STICK) {
+			P.stick_finger = ev->fingerId;
+			touch_update_stick_visual(app, (int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
+		}
 		touch_send_hit(app, &hit, 1);
 	} else {
-		int x, y;
 		tp->kind = TOUCH_MENU;
-		mouse_to_ui(wx, wy, &x, &y);
-		send_app_event_j1(app, EV_MOUSE_MOVE, x, y);
-		send_app_event_j1(app, EV_MOUSE_DOWN, x, y);
+		mouse_to_ui(wx, wy, &ux, &uy);
+		send_app_event_j1(app, EV_MOUSE_MOVE, ux, uy);
+		send_app_event_j1(app, EV_MOUSE_DOWN, ux, uy);
 	}
 }
 
 static void touch_event_motion(App* app, SDL_TouchFingerEvent* ev) {
 	TouchPoint* tp = touch_find(ev->fingerId, 0);
 	if (!tp) return;
-	if (tp->kind == TOUCH_ACTION && tp->code >= ACT_UP && tp->code <= ACT_RIGHT) {
+	if (tp->kind == TOUCH_STICK) {
 		int ow, oh;
 		SDL_GetRendererOutputSize(P.ren, &ow, &oh);
-		TouchHit hit = touch_hit((int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
-		if (hit.kind != TOUCH_ACTION || hit.code < ACT_UP || hit.code > ACT_RIGHT) {
-			TouchHit old = {TOUCH_ACTION, tp->code}; touch_send_hit(app, &old, 0);
-			tp->kind = 0; tp->code = 0;
-		} else if (hit.code != tp->code) {
-			TouchHit old = {TOUCH_ACTION, tp->code}; touch_send_hit(app, &old, 0);
-			tp->kind = hit.kind; tp->code = hit.code; touch_send_hit(app, &hit, 1);
+		int x = (int)(ev->x * ow), y = (int)(ev->y * oh);
+		touch_update_stick_visual(app, x, y, ow, oh);
+		TouchHit next = touch_stick_value(app, x, y, ow, oh);
+		if (next.code != tp->code || next.code2 != tp->code2) {
+			TouchHit old = {TOUCH_STICK, tp->code, tp->code2};
+			touch_send_hit(app, &old, 0);
+			tp->code = next.code; tp->code2 = next.code2;
+			touch_send_hit(app, &next, 1);
 		}
 	} else if (tp->kind == TOUCH_MENU) {
 		int ww, wh, x, y;
@@ -261,8 +314,11 @@ static void touch_event_motion(App* app, SDL_TouchFingerEvent* ev) {
 static void touch_event_up(App* app, SDL_TouchFingerEvent* ev) {
 	TouchPoint* tp = touch_find(ev->fingerId, 0);
 	if (!tp) return;
-	TouchHit hit = {tp->kind, tp->code};
+	TouchHit hit = {tp->kind, tp->code, tp->code2};
 	touch_send_hit(app, &hit, 0);
+	if (tp->kind == TOUCH_STICK && P.stick_finger == ev->fingerId) {
+		P.stick_visual_x = P.stick_visual_y = 0.0f;
+	}
 	memset(tp, 0, sizeof(*tp));
 }
 
@@ -270,10 +326,11 @@ static void touch_release_all(App* app) {
 	for (int i = 0; i < (int)(sizeof(P.touches) / sizeof(P.touches[0])); i++) {
 		TouchPoint* tp = &P.touches[i];
 		if (!tp->active) continue;
-		TouchHit hit = {tp->kind, tp->code};
+		TouchHit hit = {tp->kind, tp->code, tp->code2};
 		touch_send_hit(app, &hit, 0);
 		memset(tp, 0, sizeof(*tp));
 	}
+	P.stick_visual_x = P.stick_visual_y = 0.0f;
 }
 
 static void draw_circle(int cx, int cy, int r, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
@@ -329,31 +386,24 @@ static void draw_button(int cx, int cy, int r, const char* label, int label_scal
 	if (label) draw_touch_label(label, cx, cy, label_scale);
 }
 
-static void draw_arrow(int cx, int cy, int dir, int s) {
-	SDL_SetRenderDrawColor(P.ren, 245, 248, 255, 230);
-	if (dir == PAD_UP) { SDL_RenderDrawLine(P.ren,cx,cy-s,cx-s,cy); SDL_RenderDrawLine(P.ren,cx,cy-s,cx+s,cy); SDL_RenderDrawLine(P.ren,cx-s,cy,cx+s,cy); }
-	else if (dir == PAD_DOWN) { SDL_RenderDrawLine(P.ren,cx,cy+s,cx-s,cy); SDL_RenderDrawLine(P.ren,cx,cy+s,cx+s,cy); SDL_RenderDrawLine(P.ren,cx-s,cy,cx+s,cy); }
-	else if (dir == PAD_LEFT) { SDL_RenderDrawLine(P.ren,cx-s,cy,cx,cy-s); SDL_RenderDrawLine(P.ren,cx-s,cy,cx,cy+s); SDL_RenderDrawLine(P.ren,cx,cy-s,cx,cy+s); }
-	else { SDL_RenderDrawLine(P.ren,cx+s,cy,cx,cy-s); SDL_RenderDrawLine(P.ren,cx+s,cy,cx,cy+s); SDL_RenderDrawLine(P.ren,cx,cy-s,cx,cy+s); }
-}
-
-static void draw_touch_controls(int w, int h) {
-	int mini, dr, br, sr;
-	touch_geometry(w, h, &mini, &dr, &br, &sr);
+static void draw_touch_controls(int w, int h, int paused) {
+	int mini, sr, br, shr;
+	touch_geometry(w, h, &mini, &sr, &br, &shr);
 	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_BLEND);
-	/* Cruceta: círculo de base y flechas cardinales. */
-	int dx = (int)(w * .16f), dy = (int)(h * .735f);
-	draw_circle(dx, dy, dr, 18, 28, 48, 115);
-	draw_circle_outline(dx, dy, dr, 235, 242, 255, 190);
-	draw_arrow(dx, dy - dr/2, PAD_UP, dr/5); draw_arrow(dx, dy + dr/2, PAD_DOWN, dr/5);
-	draw_arrow(dx - dr/2, dy, PAD_LEFT, dr/5); draw_arrow(dx + dr/2, dy, PAD_RIGHT, dr/5);
-	/* A/B abajo a la derecha, con zonas de toque separadas. */
+	/* Base de palanca: anillos concéntricos y cavidad, sin las cuatro flechas de cruceta. */
+	int dx = (int)(w * (paused ? .62f : .16f)), dy = (int)(h * .735f);
+	draw_circle(dx, dy, sr, 8, 13, 27, 155);
+	draw_circle_outline(dx, dy, sr, 235, 242, 255, 205);
+	draw_circle(dx, dy, (int)(sr*.78f), 34, 45, 66, 145);
+	draw_circle_outline(dx, dy, (int)(sr*.78f), 108, 126, 158, 180);
+	/* A/B a la derecha. */
 	draw_button((int)(w*.865f), (int)(h*.745f), br, "A", 3);
 	draw_button((int)(w*.755f), (int)(h*.795f), br, "B", 3);
-	/* Botones superiores L/R y pausa en el centro. */	draw_button((int)(w*.085f), (int)(h*.105f), sr, "L", 2);
-	draw_button((int)(w*.915f), (int)(h*.105f), sr, "R", 2);
+	/* Botones superiores L/R y pausa. */
+	draw_button((int)(w*.085f), (int)(h*.105f), shr, "L", 2);
+	draw_button((int)(w*.915f), (int)(h*.105f), shr, "R", 2);
 	draw_button(w/2, (int)(h*.095f), (int)(mini*.060f), "PAUSA", 1);
-	/* Select y Start en el centro inferior. */
+	/* Select y Start centrados abajo. */
 	int rr = (int)(mini*.050f), y = (int)(h*.925f), sx=(int)(w*.455f), tx=(int)(w*.545f);
 	SDL_Rect sel={sx-rr*2,y-rr,rr*4,rr*2}, sta={tx-rr*2,y-rr,rr*4,rr*2};
 	SDL_SetRenderDrawColor(P.ren,18,28,48,145); SDL_RenderFillRect(P.ren,&sel); SDL_RenderFillRect(P.ren,&sta);
@@ -362,11 +412,31 @@ static void draw_touch_controls(int w, int h) {
 	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_NONE);
 }
 
-/* El overlay no cambia entre toques: hornearlo en una textura de destino evita
- * cientos de primitivas SDL por fotograma en los móviles. */
-static void ensure_touch_texture(int w, int h) {
+/* El mando visual se dibuja dinámicamente sobre la base estática y sigue el dedo. */
+static void draw_touch_stick_knob(int w, int h, int paused) {
+	int mini, sr, br, shr;
+	touch_geometry(w, h, &mini, &sr, &br, &shr);
+	(void) mini; (void) br; (void) shr;
+	int cx = (int)(w * (paused ? .62f : .16f)), cy = (int)(h * .735f);
+	int sx = cx + (int)(P.stick_visual_x * sr * .62f);
+	int sy = cy + (int)(P.stick_visual_y * sr * .62f);
+	int knob = (int)(sr * .31f);
+	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_BLEND);
+	/* Vástago corto desde el pivote hasta el pomo, con una sombra para dar profundidad. */
+	SDL_SetRenderDrawColor(P.ren, 3, 6, 12, 170);
+	SDL_RenderDrawLine(P.ren, cx+3, cy+4, sx+3, sy+4);
+	SDL_SetRenderDrawColor(P.ren, 105, 121, 151, 230);
+	SDL_RenderDrawLine(P.ren, cx, cy, sx, sy);
+	draw_circle(sx, sy, knob, 26, 36, 57, 245);
+	draw_circle_outline(sx, sy, knob, 225, 235, 255, 245);
+	draw_circle(sx - knob/3, sy - knob/3, knob/4, 132, 151, 185, 210);
+	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_NONE);
+}
+
+/* El overlay de botones no cambia por toque: cachearlo evita cientos de primitivas por fotograma. */
+static void ensure_touch_texture(int w, int h, int paused) {
 	if (P.touch_target_failed) return;
-	if (P.tex_touch && P.touch_w == w && P.touch_h == h) return;
+	if (P.tex_touch && P.touch_w == w && P.touch_h == h && P.touch_menu_overlay == paused) return;
 	if (P.tex_touch) { SDL_DestroyTexture(P.tex_touch); P.tex_touch = NULL; }
 	P.tex_touch = SDL_CreateTexture(P.ren, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, w, h);
 	if (!P.tex_touch) { P.touch_target_failed = 1; return; }
@@ -377,13 +447,14 @@ static void ensure_touch_texture(int w, int h) {
 	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_NONE);
 	SDL_SetRenderDrawColor(P.ren, 0, 0, 0, 0);
 	SDL_RenderClear(P.ren);
-	draw_touch_controls(w, h);
+	draw_touch_controls(w, h, paused);
 	SDL_SetRenderTarget(P.ren, NULL);
-	P.touch_w = w; P.touch_h = h;
+	P.touch_w = w; P.touch_h = h; P.touch_menu_overlay = paused;
 }
 #endif
 
-static void present(const AppFrame* f) {
+static void present(App* app, const AppFrame* f) {
+	(void) app;
 	int ow, oh;
 	SDL_GetRendererOutputSize(P.ren, &ow, &oh);
 	SDL_SetRenderDrawColor(P.ren, 0, 0, 0, 255);
@@ -416,9 +487,11 @@ static void present(const AppFrame* f) {
 #if defined(__ANDROID__)
 	P.last_in_game = f->in_game;
 	if (f->in_game) {
-		ensure_touch_texture(ow, oh);
+		int paused = app_touch_menu_active(app);
+		ensure_touch_texture(ow, oh, paused);
 		if (P.tex_touch) SDL_RenderCopy(P.ren, P.tex_touch, NULL, NULL);
-		else if (P.touch_target_failed) draw_touch_controls(ow, oh);
+		else if (P.touch_target_failed) draw_touch_controls(ow, oh, paused);
+		draw_touch_stick_knob(ow, oh, paused);
 	}
 #endif
 	SDL_RenderPresent(P.ren);
@@ -641,7 +714,7 @@ int APP_ENTRY(int argc, char** argv) {
 		}
 		if (!app_update(app, dt)) break;
 		app_render(app, &frame);
-		present(&frame);
+		present(app, &frame);
 
 		if (P.audio) {
 			const int16_t* data;

@@ -26,7 +26,8 @@ enum {
 	EV_MOUSE_DOWN,
 	EV_PAD_COUNT,     /* value = número de mandos conectados */
 	EV_TOUCH_DOWN,    /* code = ACT_* de config.h; botón virtual independiente del mapeo físico */
-	EV_TOUCH_UP
+	EV_TOUCH_UP,
+	EV_TOUCH_VOLUME  /* value = -10 o +10; flechas del volumen en la pausa */
 };
 typedef struct { int type, code, value, player; } AppEvent;
 
@@ -63,6 +64,11 @@ double app_frame_time(const App* a);                /* segundos que debe durar c
 int app_take_audio(App* a, const int16_t** data);   /* fotogramas estéreo pendientes (ya con volumen) */
 int app_audio_reset_requested(App* a);              /* 1 una vez tras pausar/reanudar/cargar */
 void app_audio_feedback(App* a, int queued_frames);  /* ajuste suave para evitar retraso y cortes */
+
+/* Estado auxiliar usado por la capa táctil SDL. */
+int app_is_paused(const App* a);
+int app_touch_menu_active(const App* a); /* hay una pantalla de menú sobre el juego */
+int app_pause_volume_arrow_hit(const App* a, int ui_x, int ui_y); /* -10, +10 o 0 */
 
 /* Para pruebas */
 int app_debug_state(const App* a);
