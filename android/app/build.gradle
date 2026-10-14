@@ -1,0 +1,115 @@
+import java.util.zip.ZipInputStream
+
+plugins {
+    id 'com.android.application'
+}
+
+/* SDL2 se obtiene del repositorio oficial en el primer sync. Se puede evitar
+ * la descarga si se coloca manualmente SDL2 2.30.9 en android/SDL2/. */
+def sdlVersion = '2.30.9'
+def sdlDir = file("$projectDir/../SDL2")
+def sdlCmake = new File(sdlDir, 'CMakeLists.txt')
+def sdlJava = new File(sdlDir, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java')
+
+def prepareSDL2 = {
+    if (sdlCmake.exists() && sdlJava.exists()) return
+    if (gradle.startParameter.offline) {
+        throw new GradleException("Falta SDL2 2.30.9. Desactiva el modo Offline de Gradle o coloca las fuentes oficiales en ${sdlDir}.")
+    }
+    logger.lifecycle('Descargando SDL2 oficial para compilar el APK…')
+    sdlDir.mkdirs()
+    def archive = new File(buildDir, "SDL-release-${sdlVersion}.zip")
+    archive.parentFile.mkdirs()
+    def url = new URL("https://github.com/libsdl-org/SDL/archive/refs/tags/release-${sdlVersion}.zip")
+    def connection = url.openConnection()
+    connection.connectTimeout = 20000
+    connection.readTimeout = 60000
+    connection.inputStream.withCloseable { input -> archive.withOutputStream { output -> output << input } }
+    def root = sdlDir.canonicalFile
+    new ZipInputStream(new FileInputStream(archive)).withCloseable { zip ->
+        def entry
+        while ((entry = zip.nextEntry) != null) {
+            def name = entry.name
+            def slash = name.indexOf('/')
+            if (slash >= 0) name = name.substring(slash + 1)
+            if (name.isEmpty()) { zip.closeEntry(); continue }
+            def target = new File(root, name).canonicalFile
+            if (!target.toPath().startsWith(root.toPath())) {
+                throw new GradleException("Entrada no válida en el archivo SDL2: ${entry.name}")
+            }
+            if (entry.isDirectory()) target.mkdirs()
+            else {
+                target.parentFile.mkdirs()
+                target.withOutputStream { output -> output << zip }
+            }
+            zip.closeEntry()
+        }
+    }
+    if (!sdlCmake.exists() || !sdlJava.exists()) {
+        throw new GradleException("La descarga de SDL2 ${sdlVersion} no contiene CMakeLists.txt o SDLActivity.java. Coloca la distribución oficial en ${sdlDir}.")
+    }
+}
+
+/* Android Studio necesita las fuentes JNI/Java SDL tanto al sincronizar como al
+ * invocar CMake. Prepararlas durante la configuración deja el proyecto listo al abrirlo. */
+try {
+    prepareSDL2()
+} catch (Exception ex) {
+    if (sdlCmake.exists() && sdlJava.exists()) {
+        logger.warn("SDL2 ya está disponible; se ignora un problema secundario de descarga: ${ex.message}")
+    } else {
+        throw new GradleException("No se pudo preparar SDL2 para Android. Comprueba la conexión o descarga SDL2 ${sdlVersion} y extráelo en ${sdlDir}.", ex)
+    }
+}
+
+android {
+    namespace 'com.sonicadvancetrilogy.launcher'
+    compileSdk 35
+    ndkVersion '27.0.12077973'
+
+    defaultConfig {
+        applicationId 'com.sonicadvancetrilogy.launcher'
+        minSdk 23
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+
+        ndk {
+            abiFilters 'arm64-v8a', 'armeabi-v7a', 'x86_64'
+        }
+        externalNativeBuild {
+            cmake {
+                arguments '-DANDROID_PLATFORM=android-23', '-DSDL_SHARED=ON', '-DSDL_STATIC=OFF', '-DSDL_TEST=OFF', '-DSDL_TESTS=OFF'
+            }
+        }
+    }
+
+    sourceSets {
+        main {
+            java.srcDirs += [file("$sdlDir/android-project/app/src/main/java")]
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path file('../../CMakeLists.txt')
+            version '3.22.1'
+        }
+    }
+
+    buildTypes {
+        debug {
+            // Mismo applicationId para que la ruta de ROMs sea igual en debug y release.
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging true
+        }
+    }
+}

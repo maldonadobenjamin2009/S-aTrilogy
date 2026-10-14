@@ -84,6 +84,43 @@ endif()
 add_library(launcher_core STATIC src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/app_logic.c src/app_ui.c)
 target_include_directories(launcher_core PUBLIC src)
 target_link_libraries(launcher_core PUBLIC emu_core)
+set_target_properties(emu_core launcher_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(ANDROID)
+  # Un APK debug también debe tener el núcleo de emulación optimizado; -O0 es demasiado lento en móviles.
+  target_compile_options(emu_core PRIVATE -O2)
+  target_compile_options(launcher_core PRIVATE -O2)
+endif()
+
+# ---------------------------------------------------------------------------------------
+# Android: SDL2 oficial + una biblioteca nativa "main" cargada por SDLActivity.
+# La carpeta android/SDL2 se descarga automáticamente desde Android Gradle al sincronizar.
+# ---------------------------------------------------------------------------------------
+if(ANDROID)
+  set(SDL2_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/android/SDL2" CACHE PATH "Ruta al código fuente SDL2")
+  if(NOT EXISTS "${SDL2_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "No se encuentra SDL2 en ${SDL2_SOURCE_DIR}. Abre android/ en Android Studio con conexión a Internet para descargar SDL2 automáticamente, o coloca SDL2 2.30.9 ahí.")
+  endif()
+  set(SDL_SHARED ON CACHE BOOL "Build SDL2 shared library" FORCE)
+  set(SDL_STATIC OFF CACHE BOOL "Build SDL2 static library" FORCE)
+  set(SDL_TEST OFF CACHE BOOL "Disable SDL2 tests" FORCE)
+  set(SDL_TESTS OFF CACHE BOOL "Disable SDL2 tests" FORCE)
+  add_subdirectory("${SDL2_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/SDL2")
+  if(TARGET SDL2::SDL2)
+    set(SDL_TARGET SDL2::SDL2)
+  elseif(TARGET SDL2)
+    set(SDL_TARGET SDL2)
+  elseif(TARGET SDL2-static)
+    set(SDL_TARGET SDL2-static)
+  else()
+    message(FATAL_ERROR "SDL2 no creó un destino conocido (SDL2::SDL2 / SDL2 / SDL2-static)")
+  endif()
+  add_library(main SHARED src/main_sdl.c)
+  target_link_libraries(main PRIVATE launcher_core ${SDL_TARGET} android log)
+  target_compile_options(main PRIVATE -Wall -Wextra -O2)
+  target_compile_definitions(main PRIVATE NDEBUG)
+  set_target_properties(main PROPERTIES OUTPUT_NAME main)
+  return()
+endif()
 
 # ---------------------------------------------------------------------------------------
 # Plataforma de escritorio (SDL2). Si SDL2 no está instalado se descarga y compila (hace falta internet).

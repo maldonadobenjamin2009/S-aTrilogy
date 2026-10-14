@@ -135,6 +135,7 @@ static void clear_inputs(App* a) {
 	a->p2_npad = a->p2_nstick = 0;
 	a->p2_trig[0] = a->p2_trig[1] = 0;
 	a->p2_stick[0] = a->p2_stick[1] = 0.0f;
+	memset(a->touch_down, 0, sizeof(a->touch_down));
 	for (int i = 0; i < 4; i++) a->held_dir[i] = 0;
 	a->stick_dir = -1;
 }
@@ -399,7 +400,7 @@ static uint32_t keymask(const App* a) {
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
 		int k = a->cfg.keys[i];
-		if ((k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[i])) m |= 1u << GBA_BIT[i];
+		if ((k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[i]) || a->touch_down[i]) m |= 1u << GBA_BIT[i];
 	}
 	return m;
 }
@@ -418,7 +419,7 @@ static uint32_t keymask2(const App* a) {
 }
 static int turbo_active(const App* a) {
 	int k = a->cfg.keys[ACT_TURBO];
-	return (k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[ACT_TURBO]);
+	return (k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[ACT_TURBO]) || a->touch_down[ACT_TURBO];
 }
 
 /* ------------------------------------------------------------------- ajustes */
@@ -785,6 +786,16 @@ void app_event(App* a, const AppEvent* ev) {
 	case EV_PAD_DOWN: on_pad_button(a, ev->code, 1, ev->player); break;
 	case EV_PAD_UP: on_pad_button(a, ev->code, 0, ev->player); break;
 	case EV_PAD_AXIS: on_pad_axis(a, ev->code, ev->value, ev->player); break;
+	case EV_TOUCH_DOWN:
+		if (ev->code < 0 || ev->code >= ACT_COUNT || a->state != ST_GAME) break;
+		if (ev->code == ACT_PAUSE) pause_game(a);
+		else if (ev->code == ACT_QSAVE) quick_save(a);
+		else if (ev->code == ACT_QLOAD) quick_load(a);
+		else a->touch_down[ev->code] = 1;
+		break;
+	case EV_TOUCH_UP:
+		if (ev->code >= 0 && ev->code < ACT_COUNT) a->touch_down[ev->code] = 0;
+		break;
 	case EV_PAD_COUNT:
 		a->pad_count = ev->value < 0 ? 0 : ev->value;
 		if (a->pad_count < 2) { a->p2_npad = a->p2_nstick = 0; a->p2_trig[0] = a->p2_trig[1] = 0; }

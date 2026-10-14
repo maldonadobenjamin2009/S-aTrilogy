@@ -24,7 +24,9 @@ enum {
 	EV_FOCUS_LOST,
 	EV_MOUSE_MOVE,   /* code = x, value = y (coordenadas de la interfaz 1920x1080) */
 	EV_MOUSE_DOWN,
-	EV_PAD_COUNT      /* value = número de mandos conectados */
+	EV_PAD_COUNT,     /* value = número de mandos conectados */
+	EV_TOUCH_DOWN,    /* code = ACT_* de config.h; botón virtual independiente del mapeo físico */
+	EV_TOUCH_UP
 };
 typedef struct { int type, code, value, player; } AppEvent;
 

@@ -44,6 +44,14 @@ cmake --install build --prefix SonicAdvanceTrilogy      # ejecutable + carpetas 
 Sin CMake (Linux/macOS/MSYS2): `make` (necesita `sdl2-config` o `pkg-config`). Prueba sin ventana: `make test && bin/headless_test /tmp/trabajo /tmp/capturas`
 (ejecuta el mGBA real con una ROM de prueba mínima y guarda capturas PNG de cada pantalla).
 
+## Android (APK)
+
+Hay un proyecto Android Studio en `android/` con Gradle + NDK + CMake. Abre esa carpeta en Android Studio para compilar el APK; en el primer sync se descargan las fuentes oficiales de SDL2 2.30.9. También existe un workflow `.github/workflows/android.yml` que compila y publica el APK debug como artefacto de Actions.
+
+La versión Android se ejecuta en horizontal e incluye controles táctiles semitransparentes: cruceta izquierda, A/B a la derecha, L/R en las esquinas superiores, botón de pausa en el centro superior y SELECT/START abajo al centro. Los controles táctiles emiten eventos SDL de mando, y los mandos Bluetooth siguen disponibles. Las ROMs propias deben copiarse a `Android/data/com.sonicadvancetrilogy.launcher/files/main/roms/`; las instrucciones completas están en `android/README.md`.
+
+**Limitación de esta revisión:** no se generó un APK aquí porque este entorno no tiene Android SDK/NDK ni acceso a la descarga inicial de SDL2. El proyecto Android Studio y su workflow de compilación quedaron añadidos, pero es necesario validar la primera compilación con el SDK real.
+
 ## Estado de las pruebas
 
 Probado en Linux x86-64: núcleo, interfaz, pausa, ranuras, remapeo, aviso Sí/No para dos mandos y flujo de pantalla dividida con `headless_test`. También se ejecutó una prueba directa de cable link que avanza dos núcleos, guarda/carga sus estados y cierra las instancias.

@@ -59,6 +59,7 @@ struct App {
 	int pad_count;
 	int p2_pad_down[MAXSET], p2_npad, p2_stick_down[4], p2_nstick;
 	float p2_stick[2]; int p2_trig[2];
+	int touch_down[ACT_COUNT];       /* botones virtuales Android en términos de acción GBA */
 
 	/* juego */
 	Emu* emu; Emu* emu2; int game_idx;

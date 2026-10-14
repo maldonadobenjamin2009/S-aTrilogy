@@ -13,13 +13,17 @@ llamadas al sistema operativo. Cada plataforma solo implementa un **archivo de p
 | respeta el ritmo | `app_frame_time()` (≈1/59,7275 s en juego, 1/30 s en menús) |
 | ofrece al arrancar | `AppHost`: abrir carpeta, pantalla completa, título, cursor, nombre de tecla |
 
-## Android
-* Plantilla oficial de SDL2 para Android (`android-project`): `main_sdl.c` ya usa solo SDL2 (ventana, audio, mando, teclado),
-  así que sirve casi sin cambios. Añade `src/*.c` y `third_party/mgba` al `CMakeLists.txt` de la plantilla (mismas
-  fuentes y `-D` que el `CMakeLists.txt` de la raíz; el NDK usa clang).
-* Cambia la carpeta base a `SDL_AndroidGetExternalStoragePath()` (ahí van `main/roms`, `main/saves`…).
-* Falta un **mando táctil**: dibuja botones en el lienzo `ui` y envía `EV_PAD_DOWN/UP` con los ids de `keys.h`.
-* Los mandos Bluetooth (DualShock 4 incluido) ya funcionan por la API de SDL_GameController.
+## Android (implementado en `android/`)
+
+- Proyecto Android Studio con Gradle, NDK y CMake; el núcleo C y mGBA se compilan en `libmain.so` y SDL2.
+- SDL2 oficial 2.30.9 se descarga al sincronizar Gradle si no se ha colocado previamente en `android/SDL2/`.
+- `src/main_sdl.c` usa la carpeta de archivos de la app para `main/roms`, `main/saves` y `config.txt`.
+- La app se fuerza a horizontal y dibuja controles táctiles semitransparentes: cruceta izquierda, A/B a la derecha, L/R arriba, pausa centrada arriba y SELECT/START centrados abajo.
+- El toque se traduce a acciones GBA virtuales separadas del mapeo físico, por lo que remapear un mando Bluetooth no altera la cruceta táctil.
+- El modo de pantalla dividida sigue disponible con dos mandos compatibles; los controles táctiles sirven a J1.
+- Las instrucciones para compilar e importar ROMs están en `android/README.md` y el workflow `.github/workflows/android.yml` produce un APK debug como artefacto.
+
+**Pendiente de validación física:** este entorno no tiene Android SDK/NDK ni conexión a Internet para descargar SDL2, así que el APK aún debe compilarse y probarse desde Android Studio o GitHub Actions.
 
 ## PS4 (homebrew, requiere consola con jailbreak)
 * Toolchain: OpenOrbis (C/C++, clang). `launcher_core` y mGBA no usan hilos (`DISABLE_THREADING`) ni librerías externas.

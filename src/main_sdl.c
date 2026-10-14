@@ -1,20 +1,34 @@
-/* main_sdl.c - plataforma de escritorio (Windows / Linux / macOS) con SDL2.
- * Es la ÚNICA parte del launcher que depende de SDL: abre la ventana, el audio y los mandos,
- * traduce eventos a AppEvent y muestra lo que app_render() produce. */
+/* main_sdl.c - plataforma SDL2 para escritorio y Android.
+ * Gestiona ventana/vídeo/audio/mandos, traduce eventos a AppEvent y presenta AppFrame.
+ * En Android añade controles táctiles sobre el juego. */
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#if defined(__ANDROID__)
+#include <SDL_system.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include "app.h"
 #include "emu.h"
 #include "keys.h"
+#include "config.h"
 #include "png.h"
 #include "debug_log.h"
 
 #if defined(_WIN32)
 #include <windows.h>
 #include <shellapi.h>
+#endif
+
+#if defined(__ANDROID__)
+typedef struct {
+	SDL_FingerID id;
+	int active;
+	int kind;             /* 1 = botón de mando, 2 = pausa, 3 = menú */
+	int code;
+} TouchPoint;
 #endif
 
 typedef struct {
@@ -24,6 +38,12 @@ typedef struct {
 	SDL_AudioDeviceID audio;
 	SDL_GameController* pads[16];
 	int fullscreen;
+#if defined(__ANDROID__)
+	int last_in_game;
+	TouchPoint touches[16];
+	SDL_Texture* tex_touch;
+	int touch_w, touch_h, touch_target_failed;
+#endif
 } Plat;
 
 
@@ -48,6 +68,9 @@ static void h_open_folder(void* u, const char* path) {
 	(void) u;
 #if defined(_WIN32)
 	ShellExecuteA(NULL, "open", path, NULL, NULL, SW_SHOWNORMAL);
+#elif defined(__ANDROID__)
+	/* Android no permite abrir una ruta arbitraria como carpeta mediante SDL. */
+	(void) path;
 #elif defined(__APPLE__)
 	char cmd[1200]; snprintf(cmd, sizeof(cmd), "open \"%s\" &", path); if (system(cmd)) {}
 #else
@@ -110,6 +133,256 @@ static void ui_dest(int ow, int oh, SDL_Rect* d) {
 	d->x = (ow - d->w) / 2; d->y = (oh - d->h) / 2;
 }
 
+#if defined(__ANDROID__)
+/* Controles táctiles nativos de la compilación Android. Todos emiten los mismos
+ * eventos de mando que un GameController, por lo que respetan el mapa de controles. */
+enum { TOUCH_ACTION = 1, TOUCH_MENU = 3 };
+
+typedef struct { int kind, code; } TouchHit;
+static void send_app_event_j1(App* app, int type, int code, int value);
+static void send_player(App* app, int type, int code, int value, int player);
+static void mouse_to_ui(int wx, int wy, int* ux, int* uy);
+static void touch_release_all(App* app);
+
+static void touch_geometry(int w, int h, int *mini, int *dpad_r, int *button_r, int *shoulder_r) {
+	*mini = w < h ? w : h;
+	*dpad_r = (int) (*mini * 0.135f);
+	*button_r = (int) (*mini * 0.070f);
+	*shoulder_r = (int) (*mini * 0.055f);
+}
+
+static TouchHit touch_hit(int x, int y, int w, int h) {
+	int mini, dr, br, sr;
+	touch_geometry(w, h, &mini, &dr, &br, &sr);
+	TouchHit none = {0, 0};
+	/* Pausa arriba, centrada. */
+	int cx = w / 2, cy = (int) (h * 0.095f);
+	int dx = x - cx, dy = y - cy;
+	int pr = (int) (mini * 0.060f);
+	if (dx * dx + dy * dy <= pr * pr) { TouchHit z = {TOUCH_ACTION, ACT_PAUSE}; return z; }
+	/* L y R en las esquinas superiores. */
+	cx = (int) (w * 0.085f); cy = (int) (h * 0.105f);
+	dx = x - cx; dy = y - cy;
+	if (dx * dx + dy * dy <= sr * sr) { TouchHit z = {TOUCH_ACTION, ACT_L}; return z; }
+	cx = (int) (w * 0.915f); cy = (int) (h * 0.105f);
+	dx = x - cx; dy = y - cy;
+	if (dx * dx + dy * dy <= sr * sr) { TouchHit z = {TOUCH_ACTION, ACT_R}; return z; }
+	/* Cruceta izquierda: una dirección por contacto, con selección dominante. */
+	cx = (int) (w * 0.16f); cy = (int) (h * 0.735f);
+	dx = x - cx; dy = y - cy;
+	if (abs(dx) <= (int)(dr * 1.10f) && abs(dy) <= (int)(dr * 1.10f)) {
+		if (abs(dx) > abs(dy)) { TouchHit z = {TOUCH_ACTION, dx < 0 ? ACT_LEFT : ACT_RIGHT}; return z; }
+		if (dy != 0) { TouchHit z = {TOUCH_ACTION, dy < 0 ? ACT_UP : ACT_DOWN}; return z; }
+	}
+	/* Botones A (derecha) y B (izquierda). A/B siguen el mapeo predeterminado
+	 * de mGBA: círculo -> A y cruz -> B. */
+	cx = (int) (w * 0.865f); cy = (int) (h * 0.745f);
+	dx = x - cx; dy = y - cy;
+	if (dx * dx + dy * dy <= br * br) { TouchHit z = {TOUCH_ACTION, ACT_A}; return z; }
+	cx = (int) (w * 0.755f); cy = (int) (h * 0.795f);
+	dx = x - cx; dy = y - cy;
+	if (dx * dx + dy * dy <= br * br) { TouchHit z = {TOUCH_ACTION, ACT_B}; return z; }
+	/* Select/Start centrados abajo, en dos superficies tipo pastilla. */
+	int small_r = (int)(mini * 0.050f), btn_y = (int)(h * 0.925f);
+	int select_x = (int)(w * 0.455f), start_x = (int)(w * 0.545f);
+	if (abs(x - select_x) <= small_r * 2 && abs(y - btn_y) <= small_r) { TouchHit z = {TOUCH_ACTION, ACT_SELECT}; return z; }
+	if (abs(x - start_x) <= small_r * 2 && abs(y - btn_y) <= small_r) { TouchHit z = {TOUCH_ACTION, ACT_START}; return z; }
+	return none;
+}
+
+static void touch_send_hit(App* app, const TouchHit* hit, int down) {
+	if (!hit || !hit->kind) return;
+	if (hit->kind == TOUCH_ACTION) send_app_event_j1(app, down ? EV_TOUCH_DOWN : EV_TOUCH_UP, hit->code, 0);
+}
+
+static TouchPoint* touch_find(SDL_FingerID id, int create) {
+	TouchPoint* free_slot = NULL;
+	for (int i = 0; i < (int)(sizeof(P.touches) / sizeof(P.touches[0])); i++) {
+		if (P.touches[i].active && P.touches[i].id == id) return &P.touches[i];
+		if (!P.touches[i].active && !free_slot) free_slot = &P.touches[i];
+	}
+	if (create && free_slot) {
+		memset(free_slot, 0, sizeof(*free_slot));
+		free_slot->active = 1;
+		free_slot->id = id;
+		return free_slot;
+	}
+	return NULL;
+}
+
+static void touch_event_down(App* app, SDL_TouchFingerEvent* ev) {
+	int ww, wh, ow, oh;
+	SDL_GetWindowSize(P.win, &ww, &wh);
+	SDL_GetRendererOutputSize(P.ren, &ow, &oh);
+	int wx = (int)(ev->x * (ww > 0 ? ww : ow));
+	int wy = (int)(ev->y * (wh > 0 ? wh : oh));
+	TouchPoint* tp = touch_find(ev->fingerId, 1);
+	if (!tp) return;
+	if (P.last_in_game) {
+		TouchHit hit = touch_hit((int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
+		if (hit.kind == TOUCH_ACTION && hit.code == ACT_PAUSE) {
+			touch_release_all(app);
+			tp = touch_find(ev->fingerId, 1);
+			if (!tp) return;
+		}
+		tp->kind = hit.kind; tp->code = hit.code;
+		touch_send_hit(app, &hit, 1);
+	} else {
+		int x, y;
+		tp->kind = TOUCH_MENU;
+		mouse_to_ui(wx, wy, &x, &y);
+		send_app_event_j1(app, EV_MOUSE_MOVE, x, y);
+		send_app_event_j1(app, EV_MOUSE_DOWN, x, y);
+	}
+}
+
+static void touch_event_motion(App* app, SDL_TouchFingerEvent* ev) {
+	TouchPoint* tp = touch_find(ev->fingerId, 0);
+	if (!tp) return;
+	if (tp->kind == TOUCH_ACTION && tp->code >= ACT_UP && tp->code <= ACT_RIGHT) {
+		int ow, oh;
+		SDL_GetRendererOutputSize(P.ren, &ow, &oh);
+		TouchHit hit = touch_hit((int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
+		if (hit.kind != TOUCH_ACTION || hit.code < ACT_UP || hit.code > ACT_RIGHT) {
+			TouchHit old = {TOUCH_ACTION, tp->code}; touch_send_hit(app, &old, 0);
+			tp->kind = 0; tp->code = 0;
+		} else if (hit.code != tp->code) {
+			TouchHit old = {TOUCH_ACTION, tp->code}; touch_send_hit(app, &old, 0);
+			tp->kind = hit.kind; tp->code = hit.code; touch_send_hit(app, &hit, 1);
+		}
+	} else if (tp->kind == TOUCH_MENU) {
+		int ww, wh, x, y;
+		SDL_GetWindowSize(P.win, &ww, &wh);
+		mouse_to_ui((int)(ev->x * ww), (int)(ev->y * wh), &x, &y);
+		send_app_event_j1(app, EV_MOUSE_MOVE, x, y);
+	}
+}
+
+static void touch_event_up(App* app, SDL_TouchFingerEvent* ev) {
+	TouchPoint* tp = touch_find(ev->fingerId, 0);
+	if (!tp) return;
+	TouchHit hit = {tp->kind, tp->code};
+	touch_send_hit(app, &hit, 0);
+	memset(tp, 0, sizeof(*tp));
+}
+
+static void touch_release_all(App* app) {
+	for (int i = 0; i < (int)(sizeof(P.touches) / sizeof(P.touches[0])); i++) {
+		TouchPoint* tp = &P.touches[i];
+		if (!tp->active) continue;
+		TouchHit hit = {tp->kind, tp->code};
+		touch_send_hit(app, &hit, 0);
+		memset(tp, 0, sizeof(*tp));
+	}
+}
+
+static void draw_circle(int cx, int cy, int r, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+	SDL_SetRenderDrawColor(P.ren, red, green, blue, alpha);
+	for (int y = -r; y <= r; y++) {
+		int x = (int)sqrt((double)r * r - (double)y * y);
+		SDL_RenderDrawLine(P.ren, cx - x, cy + y, cx + x, cy + y);
+	}
+}
+
+static void draw_circle_outline(int cx, int cy, int r, Uint8 red, Uint8 green, Uint8 blue, Uint8 alpha) {
+	SDL_SetRenderDrawColor(P.ren, red, green, blue, alpha);
+	int x = r, y = 0, err = 1 - x;
+	while (x >= y) {
+		SDL_RenderDrawPoint(P.ren, cx + x, cy + y); SDL_RenderDrawPoint(P.ren, cx + y, cy + x);
+		SDL_RenderDrawPoint(P.ren, cx - y, cy + x); SDL_RenderDrawPoint(P.ren, cx - x, cy + y);
+		SDL_RenderDrawPoint(P.ren, cx - x, cy - y); SDL_RenderDrawPoint(P.ren, cx - y, cy - x);
+		SDL_RenderDrawPoint(P.ren, cx + y, cy - x); SDL_RenderDrawPoint(P.ren, cx + x, cy - y);
+		y++;
+		if (err < 0) err += 2 * y + 1; else { x--; err += 2 * (y - x + 1); }
+	}
+}
+
+static const Uint8* touch_glyph(char c) {
+	static const Uint8 A[7]={14,17,17,31,17,17,17}, B[7]={30,17,17,30,17,17,30};
+	static const Uint8 C[7]={14,17,16,16,16,17,14}, E[7]={31,16,16,30,16,16,31};
+	static const Uint8 L[7]={16,16,16,16,16,16,31}, P[7]={30,17,17,30,16,16,16};
+	static const Uint8 R[7]={30,17,17,30,20,18,17}, S[7]={15,16,16,14,1,1,30};
+	static const Uint8 T[7]={31,4,4,4,4,4,4}, U[7]={17,17,17,17,17,17,14};
+	switch (c) { case 'A': return A; case 'B': return B; case 'C': return C; case 'E': return E; case 'L': return L;
+	case 'P': return P; case 'R': return R; case 'S': return S; case 'T': return T; case 'U': return U; default: return NULL; }
+}
+
+static void draw_touch_label(const char* text, int cx, int cy, int scale) {
+	int len = (int)strlen(text), total = len ? len * 6 * scale - scale : 0;
+	int x0 = cx - total / 2, y0 = cy - (7 * scale) / 2;
+	SDL_SetRenderDrawColor(P.ren, 255, 255, 255, 235);
+	for (int i = 0; i < len; i++) {
+		const Uint8* glyph = touch_glyph(text[i]);
+		if (!glyph) continue;
+		for (int y = 0; y < 7; y++) for (int x = 0; x < 5; x++) {
+			if (glyph[y] & (1 << (4 - x))) {
+				SDL_Rect px = {x0 + i * 6 * scale + x * scale, y0 + y * scale, scale, scale};
+				SDL_RenderFillRect(P.ren, &px);
+			}
+		}
+	}
+}
+
+static void draw_button(int cx, int cy, int r, const char* label, int label_scale) {
+	draw_circle(cx, cy, r, 18, 28, 48, 135);
+	draw_circle_outline(cx, cy, r, 235, 242, 255, 220);
+	if (label) draw_touch_label(label, cx, cy, label_scale);
+}
+
+static void draw_arrow(int cx, int cy, int dir, int s) {
+	SDL_SetRenderDrawColor(P.ren, 245, 248, 255, 230);
+	if (dir == PAD_UP) { SDL_RenderDrawLine(P.ren,cx,cy-s,cx-s,cy); SDL_RenderDrawLine(P.ren,cx,cy-s,cx+s,cy); SDL_RenderDrawLine(P.ren,cx-s,cy,cx+s,cy); }
+	else if (dir == PAD_DOWN) { SDL_RenderDrawLine(P.ren,cx,cy+s,cx-s,cy); SDL_RenderDrawLine(P.ren,cx,cy+s,cx+s,cy); SDL_RenderDrawLine(P.ren,cx-s,cy,cx+s,cy); }
+	else if (dir == PAD_LEFT) { SDL_RenderDrawLine(P.ren,cx-s,cy,cx,cy-s); SDL_RenderDrawLine(P.ren,cx-s,cy,cx,cy+s); SDL_RenderDrawLine(P.ren,cx,cy-s,cx,cy+s); }
+	else { SDL_RenderDrawLine(P.ren,cx+s,cy,cx,cy-s); SDL_RenderDrawLine(P.ren,cx+s,cy,cx,cy+s); SDL_RenderDrawLine(P.ren,cx,cy-s,cx,cy+s); }
+}
+
+static void draw_touch_controls(int w, int h) {
+	int mini, dr, br, sr;
+	touch_geometry(w, h, &mini, &dr, &br, &sr);
+	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_BLEND);
+	/* Cruceta: círculo de base y flechas cardinales. */
+	int dx = (int)(w * .16f), dy = (int)(h * .735f);
+	draw_circle(dx, dy, dr, 18, 28, 48, 115);
+	draw_circle_outline(dx, dy, dr, 235, 242, 255, 190);
+	draw_arrow(dx, dy - dr/2, PAD_UP, dr/5); draw_arrow(dx, dy + dr/2, PAD_DOWN, dr/5);
+	draw_arrow(dx - dr/2, dy, PAD_LEFT, dr/5); draw_arrow(dx + dr/2, dy, PAD_RIGHT, dr/5);
+	/* A/B abajo a la derecha, con zonas de toque separadas. */
+	draw_button((int)(w*.865f), (int)(h*.745f), br, "A", 3);
+	draw_button((int)(w*.755f), (int)(h*.795f), br, "B", 3);
+	/* Botones superiores L/R y pausa en el centro. */	draw_button((int)(w*.085f), (int)(h*.105f), sr, "L", 2);
+	draw_button((int)(w*.915f), (int)(h*.105f), sr, "R", 2);
+	draw_button(w/2, (int)(h*.095f), (int)(mini*.060f), "PAUSA", 1);
+	/* Select y Start en el centro inferior. */
+	int rr = (int)(mini*.050f), y = (int)(h*.925f), sx=(int)(w*.455f), tx=(int)(w*.545f);
+	SDL_Rect sel={sx-rr*2,y-rr,rr*4,rr*2}, sta={tx-rr*2,y-rr,rr*4,rr*2};
+	SDL_SetRenderDrawColor(P.ren,18,28,48,145); SDL_RenderFillRect(P.ren,&sel); SDL_RenderFillRect(P.ren,&sta);
+	SDL_SetRenderDrawColor(P.ren,235,242,255,220); SDL_RenderDrawRect(P.ren,&sel); SDL_RenderDrawRect(P.ren,&sta);
+	draw_touch_label("SELECT",sx,y,1); draw_touch_label("START",tx,y,1);
+	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_NONE);
+}
+
+/* El overlay no cambia entre toques: hornearlo en una textura de destino evita
+ * cientos de primitivas SDL por fotograma en los móviles. */
+static void ensure_touch_texture(int w, int h) {
+	if (P.touch_target_failed) return;
+	if (P.tex_touch && P.touch_w == w && P.touch_h == h) return;
+	if (P.tex_touch) { SDL_DestroyTexture(P.tex_touch); P.tex_touch = NULL; }
+	P.tex_touch = SDL_CreateTexture(P.ren, SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, w, h);
+	if (!P.tex_touch) { P.touch_target_failed = 1; return; }
+	SDL_SetTextureBlendMode(P.tex_touch, SDL_BLENDMODE_BLEND);
+	if (SDL_SetRenderTarget(P.ren, P.tex_touch) != 0) {
+		SDL_DestroyTexture(P.tex_touch); P.tex_touch = NULL; P.touch_target_failed = 1; return;
+	}
+	SDL_SetRenderDrawBlendMode(P.ren, SDL_BLENDMODE_NONE);
+	SDL_SetRenderDrawColor(P.ren, 0, 0, 0, 0);
+	SDL_RenderClear(P.ren);
+	draw_touch_controls(w, h);
+	SDL_SetRenderTarget(P.ren, NULL);
+	P.touch_w = w; P.touch_h = h;
+}
+#endif
+
 static void present(const AppFrame* f) {
 	int ow, oh;
 	SDL_GetRendererOutputSize(P.ren, &ow, &oh);
@@ -140,6 +413,14 @@ static void present(const AppFrame* f) {
 		ui_dest(ow, oh, &d);
 		SDL_RenderCopy(P.ren, P.tex_ui, NULL, &d);
 	}
+#if defined(__ANDROID__)
+	P.last_in_game = f->in_game;
+	if (f->in_game) {
+		ensure_touch_texture(ow, oh);
+		if (P.tex_touch) SDL_RenderCopy(P.ren, P.tex_touch, NULL, NULL);
+		else if (P.touch_target_failed) draw_touch_controls(ow, oh);
+	}
+#endif
 	SDL_RenderPresent(P.ren);
 }
 
@@ -155,6 +436,9 @@ static void close_pad(SDL_JoystickID id) {
 
 static int map_key(SDL_Keycode k) {
 	if (k == SDLK_KP_ENTER) return K_RETURN;
+#if defined(__ANDROID__)
+	if (k == SDLK_AC_BACK) return K_ESCAPE;
+#endif
 	return (int) k;
 }
 
@@ -207,7 +491,17 @@ static void pump_events(App* app) {
 		case SDL_CONTROLLERBUTTONDOWN: send_pad_event(app, EV_PAD_DOWN, e.cbutton.button, 0, e.cbutton.which); break;
 		case SDL_CONTROLLERBUTTONUP: send_pad_event(app, EV_PAD_UP, e.cbutton.button, 0, e.cbutton.which); break;
 		case SDL_CONTROLLERAXISMOTION: send_pad_event(app, EV_PAD_AXIS, e.caxis.axis, e.caxis.value, e.caxis.which); break;
-		case SDL_WINDOWEVENT: if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) send_app_event_j1(app, EV_FOCUS_LOST, 0, 0); break;
+		case SDL_WINDOWEVENT: if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) {
+#if defined(__ANDROID__)
+			touch_release_all(app);
+#endif
+			send_app_event_j1(app, EV_FOCUS_LOST, 0, 0);
+		} break;
+#if defined(__ANDROID__)
+		case SDL_FINGERDOWN: touch_event_down(app, &e.tfinger); break;
+		case SDL_FINGERMOTION: touch_event_motion(app, &e.tfinger); break;
+		case SDL_FINGERUP: touch_event_up(app, &e.tfinger); break;
+#endif
 		case SDL_MOUSEMOTION: { int x, y; mouse_to_ui(e.motion.x, e.motion.y, &x, &y); send_app_event_j1(app, EV_MOUSE_MOVE, x, y); break; }
 		case SDL_MOUSEBUTTONDOWN: if (e.button.button == SDL_BUTTON_LEFT) { int x, y; mouse_to_ui(e.button.x, e.button.y, &x, &y); send_app_event_j1(app, EV_MOUSE_DOWN, x, y); } break;
 		default: break;
@@ -216,7 +510,12 @@ static void pump_events(App* app) {
 }
 
 /* --------------------------------------------------------------------------- main */
-int main(int argc, char** argv) {
+#if defined(__ANDROID__)
+#define APP_ENTRY SDL_main
+#else
+#define APP_ENTRY main
+#endif
+int APP_ENTRY(int argc, char** argv) {
 	(void) argc; (void) argv;
 #if defined(_WIN32)
 	open_debug_console();
@@ -231,6 +530,13 @@ int main(int argc, char** argv) {
 		return 1;
 	}
 	char base[1024] = ".";
+#if defined(__ANDROID__)
+	/* Directorio privado de la app en almacenamiento externo: permite importar ROMs
+	 * sin pedir permisos globales de almacenamiento (Android 10+). */
+	const char* android_base = SDL_AndroidGetExternalStoragePath();
+	if (!android_base || !*android_base) android_base = SDL_AndroidGetInternalStoragePath();
+	if (android_base && *android_base) snprintf(base, sizeof(base), "%s", android_base);
+#else
 	char* bp = SDL_GetBasePath();
 	if (bp) {
 		snprintf(base, sizeof(base), "%s", bp);
@@ -238,12 +544,27 @@ int main(int argc, char** argv) {
 		while (n > 1 && (base[n - 1] == '/' || base[n - 1] == '\\')) base[--n] = 0;
 		SDL_free(bp);
 	}
+#endif
 
+#if defined(__ANDROID__)
+	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_ALLOW_HIGHDPI);
+#else
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy Launcher", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
+#endif
 	if (!P.win) { debug_log_error("No se pudo crear la ventana: %s", SDL_GetError()); SDL_Quit(); debug_log_close(); return 1; }
+#if defined(__ANDROID__)
+	/* Controlamos el ritmo a ~59,7 FPS nosotros mismos: dejar VSYNC activado
+	 * en pantallas de 90/120 Hz puede provocar 45/40 FPS por la cadencia de swap. */
+	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
+	if (!P.ren) { debug_log_warn("Renderizador acelerado no disponible: %s", SDL_GetError()); P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE); }
+#else
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0"); /* el reloj del launcher fija los fotogramas */
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
 	if (!P.ren) { debug_log_warn("Renderizador acelerado no disponible: %s", SDL_GetError()); P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE); }
+#endif
 	if (P.ren) { SDL_RendererInfo ri; if (SDL_GetRendererInfo(P.ren, &ri) == 0) debug_log_info("Renderizador: %s", ri.name); }
 	if (!P.ren) { debug_log_error("No se pudo crear el renderizador: %s", SDL_GetError()); SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1; }
 	P.tex_ui = make_tex(SDL_PIXELFORMAT_ARGB8888, UI_W, UI_H, 1, SDL_BLENDMODE_BLEND);
@@ -339,9 +660,17 @@ int main(int argc, char** argv) {
 
 		next += app_frame_time(app);
 		double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
+#if defined(__ANDROID__)
+		/* Sin spin-wait en móviles: dormir casi todo el intervalo reduce consumo,
+		 * pero el reloj fijo mantiene la emulación en torno a 59,7 FPS incluso
+		 * en pantallas de 90/120 Hz. */
+		if (delay > 0.002) SDL_Delay((Uint32)((delay - 0.001) * 1000.0));
+		if (delay < -0.25) next = SDL_GetPerformanceCounter() / freq;
+#else
 		if (delay > 0.002) SDL_Delay((Uint32) ((delay - 0.001) * 1000.0));
 		if (delay > -0.25) { while (SDL_GetPerformanceCounter() / freq < next) { } }
 		else next = SDL_GetPerformanceCounter() / freq;
+#endif
 	}
 
 	debug_log_info("El bucle principal terminó; liberando recursos");
