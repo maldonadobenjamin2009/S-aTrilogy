@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates curl tar
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates curl tar golang-go
           git lfs install --system
 
       - name: Checkout source and tracked ROM/assets (Git LFS)
@@ -78,29 +78,23 @@ jobs:
           fi
           [ -f "$TOOLS/create-fself" ] && chmod u+x "$TOOLS/create-fself"
 
-          # The official OpenOrbis toolchain build downloads create-gp4 as a
-          # separate release asset; some runtime images omit it from bin/linux.
-          # Fetch that official Linux binary only when it is actually missing.
-          if [ ! -f "$TOOLS/create-gp4" ]; then
-            echo "create-gp4 is absent; downloading official OpenOrbis/create-gp4 release"
-            TMP_GP4="$(mktemp -d)"
-            trap 'rm -rf "$TMP_GP4"' EXIT
-            curl -fL --retry 3 --retry-delay 2 \
-              "https://github.com/OpenOrbis/create-gp4/releases/latest/download/binaries.tar.gz" \
-              -o "$TMP_GP4/binaries.tar.gz"
-            mkdir -p "$TMP_GP4/extracted"
-            tar -xzf "$TMP_GP4/binaries.tar.gz" -C "$TMP_GP4/extracted"
-            GP4_FOUND="$(find "$TMP_GP4/extracted" -type f -name create-gp4 -print -quit)"
-            if [ -z "$GP4_FOUND" ]; then
-              echo "::error::Official create-gp4 archive did not contain a create-gp4 binary"
-              echo "Archive contents:"
-              find "$TMP_GP4/extracted" -maxdepth 5 -type f -print | sort || true
-              exit 1
-            fi
-            install -m 0755 "$GP4_FOUND" "$TOOLS/create-gp4"
-            rm -rf "$TMP_GP4"
-            trap - EXIT
-          fi
+          # Build create-gp4 from the official Go source on this runner. The
+          # published binaries.tar.gz contains multiple platforms, and choosing
+          # the first matching filename can install a Windows/macOS binary in
+          # this Linux container (Exec format error).
+          echo "Building official OpenOrbis/create-gp4 for linux/amd64"
+          TMP_GP4="$(mktemp -d)"
+          git clone --depth 1 https://github.com/OpenOrbis/create-gp4.git "$TMP_GP4/src"
+          (
+            cd "$TMP_GP4/src/cmd/create-gp4"
+            GO111MODULE=off CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+              go build -trimpath -ldflags="-s -w" -o "$TOOLS/create-gp4" .
+          )
+          rm -rf "$TMP_GP4"
+          chmod 0755 "$TOOLS/create-gp4"
+          echo "Built create-gp4 architecture:"
+          file "$TOOLS/create-gp4" || true
+          "$TOOLS/create-gp4" -h >/dev/null 2>&1 || true
 
           # Show actual paths and permissions so a future SDK-layout mismatch is diagnosable.
           echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
