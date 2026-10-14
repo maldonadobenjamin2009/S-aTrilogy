@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          lfs: true
       - name: Set up Java
         uses: actions/setup-java@v4
         with:
@@ -26,6 +28,18 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.7'
+      - name: Verify bundled ROMs and assets
+        run: |
+          test -d dist/main/roms || { echo "Falta dist/main/roms"; exit 1; }
+          test -d dist/assets || { echo "Falta dist/assets"; exit 1; }
+          echo "ROMs que se incluirán en el APK:"
+          find dist/main/roms -maxdepth 1 -type f -size +1k \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) -print
+          rom_count=$(find dist/main/roms -maxdepth 1 -type f -size +1k \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) | wc -l)
+          if [ "$rom_count" -eq 0 ]; then echo "::error::No hay ROMs en dist/main/roms (o no están rastreadas en Git)."; exit 1; fi
+          echo "Imágenes que se incluirán en el APK:"
+          find dist/assets -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print
+          image_count=$(find dist/assets -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l)
+          if [ "$image_count" -eq 0 ]; then echo "::error::No hay imágenes en dist/assets (o no están rastreadas en Git)."; exit 1; fi
       - name: Build debug APK
         working-directory: android
         run: gradle :app:assembleDebug --no-daemon

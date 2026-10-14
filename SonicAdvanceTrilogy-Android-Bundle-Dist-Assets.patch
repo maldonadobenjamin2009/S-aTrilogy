@@ -1,0 +1,271 @@
+diff --git a/.github/workflows/android.yml b/.github/workflows/android.yml
+index 95c8820..fa60636 100644
+--- a/.github/workflows/android.yml
++++ b/.github/workflows/android.yml
+@@ -11,6 +11,8 @@ jobs:
+     steps:
+       - name: Checkout
+         uses: actions/checkout@v4
++        with:
++          lfs: true
+       - name: Set up Java
+         uses: actions/setup-java@v4
+         with:
+@@ -26,6 +28,18 @@ jobs:
+         uses: gradle/actions/setup-gradle@v4
+         with:
+           gradle-version: '8.7'
++      - name: Verify bundled ROMs and assets
++        run: |
++          test -d dist/main/roms || { echo "Falta dist/main/roms"; exit 1; }
++          test -d dist/assets || { echo "Falta dist/assets"; exit 1; }
++          echo "ROMs que se incluirán en el APK:"
++          find dist/main/roms -maxdepth 1 -type f -size +1k \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) -print
++          rom_count=$(find dist/main/roms -maxdepth 1 -type f -size +1k \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) | wc -l)
++          if [ "$rom_count" -eq 0 ]; then echo "::error::No hay ROMs en dist/main/roms (o no están rastreadas en Git)."; exit 1; fi
++          echo "Imágenes que se incluirán en el APK:"
++          find dist/assets -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) -print
++          image_count=$(find dist/assets -type f \( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' \) | wc -l)
++          if [ "$image_count" -eq 0 ]; then echo "::error::No hay imágenes en dist/assets (o no están rastreadas en Git)."; exit 1; fi
+       - name: Build debug APK
+         working-directory: android
+         run: gradle :app:assembleDebug --no-daemon
+diff --git a/README.md b/README.md
+index ffb3db6..816a06b 100644
+--- a/README.md
++++ b/README.md
+@@ -48,7 +48,7 @@ Sin CMake (Linux/macOS/MSYS2): `make` (necesita `sdl2-config` o `pkg-config`). P
+ 
+ Hay un proyecto Android Studio en `android/` con Gradle + NDK + CMake. Abre esa carpeta en Android Studio para compilar el APK; en el primer sync se descargan las fuentes oficiales de SDL2 2.30.9. También existe un workflow `.github/workflows/android.yml` que compila y publica el APK debug como artefacto de Actions.
+ 
+-La versión Android se ejecuta en horizontal e incluye controles táctiles semitransparentes: cruceta izquierda, A/B a la derecha, L/R en las esquinas superiores, botón de pausa en el centro superior y SELECT/START abajo al centro. Los controles táctiles emiten eventos SDL de mando, y los mandos Bluetooth siguen disponibles. Las ROMs propias deben copiarse a `Android/data/com.sonicadvancetrilogy.launcher/files/main/roms/`; las instrucciones completas están en `android/README.md`.
++La versión Android se ejecuta en horizontal e incluye controles táctiles semitransparentes: cruceta izquierda, A/B a la derecha, L/R en las esquinas superiores, botón de pausa en el centro superior y SELECT/START abajo al centro. Los controles táctiles emiten eventos SDL de mando, y los mandos Bluetooth siguen disponibles. La compilación Android empaqueta `dist/main/roms/` y `dist/assets/` dentro del APK y copia los recursos que falten a los datos privados de la aplicación en el primer inicio; las instrucciones completas están en `android/README.md`.
+ 
+ **Limitación de esta revisión:** no se generó un APK aquí porque este entorno no tiene Android SDK/NDK ni acceso a la descarga inicial de SDL2. El proyecto Android Studio y su workflow de compilación quedaron añadidos, pero es necesario validar la primera compilación con el SDK real.
+ 
+diff --git a/android/README.md b/android/README.md
+index aaa484f..ce15361 100644
+--- a/android/README.md
++++ b/android/README.md
+@@ -17,9 +17,13 @@ La actividad usa SDL2 oficial, y `src/main_sdl.c` dibuja controles táctiles mie
+ 
+ El proyecto compila las fuentes del launcher y mGBA desde el `CMakeLists.txt` de la raíz; no hace falta mantener una segunda copia del núcleo.
+ 
+-## ROMs y guardados
++## ROMs y assets incluidos en el APK
+ 
+-Android usa el directorio privado de archivos de la aplicación. Coloca las ROMs que poseas en:
++La compilación incorpora automáticamente el contenido de `dist/main/roms/` y `dist/assets/` dentro de los assets del APK. Al iniciar, `SonicAdvanceActivity` copia los archivos empaquetados que falten al directorio de datos de la app antes de arrancar SDL/mGBA. Así, la primera ejecución encuentra las ROMs y las imágenes sin tener que copiarlas manualmente. La copia no sobrescribe archivos existentes, por lo que se conservan tus partidas, configuraciones y recursos personalizados.
++
++La tarea `verifyBundledGameData` hace fallar la compilación si el checkout no contiene al menos una ROM (`.gba`, `.gbc` o `.gb`) y una imagen compatible en `dist/assets/`. Si el workflow falla en esa comprobación, revisa que esos archivos estén realmente rastreados en Git y disponibles en la rama que se compila.
++
++Los archivos incluidos se copian al directorio privado de la aplicación. También puedes añadir o reemplazar tus propias ROMs en:
+ 
+ `Android/data/com.sonicadvancetrilogy.launcher/files/main/roms/`
+ 
+@@ -46,5 +50,5 @@ Los controles táctiles emiten eventos de mando SDL y pueden coexistir con un ma
+ ## Limitaciones conocidas
+ 
+ - Este entorno de edición no incluye Android SDK/NDK ni conexión de descarga, por lo que el APK no se ha podido compilar aquí. La compilación debe verificarse en Android Studio.
+-- La importación de ROMs se realiza copiando archivos a la carpeta de la app; no se incluye todavía un selector Android de archivos.
++- No se incluye todavía un selector Android de archivos; las ROMs presentes en `dist/main/roms/` se empaquetan con el APK automáticamente.
+ - El modo de pantalla dividida queda disponible si conectas un mando compatible; los controles táctiles son para J1.
+diff --git a/android/app/build.gradle b/android/app/build.gradle
+index 0d4777a..5fcb2a1 100644
+--- a/android/app/build.gradle
++++ b/android/app/build.gradle
+@@ -8,6 +8,9 @@ plugins {
+  * la descarga si se coloca manualmente SDL2 2.30.9 en android/SDL2/. */
+ def sdlVersion = '2.30.9'
+ def sdlDir = file("$projectDir/../SDL2")
++// Dist es la fuente de verdad para el contenido empaquetado: dist/main/roms y dist/assets.
++def repositoryDist = file("$projectDir/../../dist")
++def generatedBundledAssets = file("$buildDir/generated/bundledAssets")
+ def sdlCmake = new File(sdlDir, 'CMakeLists.txt')
+ def sdlJava = new File(sdlDir, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java')
+ 
+@@ -62,6 +65,49 @@ try {
+     }
+ }
+ 
++tasks.register('verifyBundledGameData') {
++    group = 'verification'
++    description = 'Comprueba que dist contiene ROMs y assets que se empaquetarán en el APK.'
++    doLast {
++        def romDir = new File(repositoryDist, 'main/roms')
++        def artDir = new File(repositoryDist, 'assets')
++        if (!romDir.isDirectory()) {
++            throw new GradleException("No existe ${romDir}. Las ROMs deben estar en dist/main/roms.")
++        }
++        if (!artDir.isDirectory()) {
++            throw new GradleException("No existe ${artDir}. Los recursos deben estar en dist/assets.")
++        }
++        // El launcher enumera ROMs en el nivel directo de main/roms, no recursivamente.
++        def roms = (romDir.listFiles() ?: []).findAll { f ->
++            f.isFile() && f.length() > 1024L && ['.gba', '.gbc', '.gb'].any { ext -> f.name.toLowerCase(Locale.ROOT).endsWith(ext) }
++        }
++        if (roms.isEmpty()) {
++            throw new GradleException("No se encontraron ROMs válidas (>1 KiB, .gba/.gbc/.gb) en ${romDir}; comprueba que Git LFS descargó los binarios reales si corresponde.")
++        }
++        def art = fileTree(artDir).files.findAll { f ->
++            f.isFile() && ['.png', '.jpg', '.jpeg', '.webp'].any { ext -> f.name.toLowerCase(Locale.ROOT).endsWith(ext) }
++        }
++        if (art.isEmpty()) {
++            throw new GradleException("No se encontraron imágenes en ${artDir}; los recursos deben estar incluidos en el repositorio.")
++        }
++        logger.lifecycle("Contenido del APK: ${roms.size()} ROM(s) y ${art.size()} imagen(es) encontradas en dist/.")
++    }
++}
++
++// Solo se copian las dos carpetas requeridas; no se empaqueta el resto de dist/.
++tasks.register('prepareBundledGameData', Sync) {
++    group = 'build'
++    description = 'Prepara las ROMs y los assets que se incluirán en el APK.'
++    dependsOn tasks.named('verifyBundledGameData')
++    into generatedBundledAssets
++    from(new File(repositoryDist, 'main/roms')) { into 'main/roms' }
++    from(new File(repositoryDist, 'assets')) { into 'assets' }
++}
++
++afterEvaluate {
++    tasks.named('preBuild').configure { dependsOn tasks.named('prepareBundledGameData') }
++}
++
+ android {
+     namespace 'com.sonicadvancetrilogy.launcher'
+     compileSdk 35
+@@ -87,6 +133,10 @@ android {
+     sourceSets {
+         main {
+             java.srcDirs += [file("$sdlDir/android-project/app/src/main/java")]
++            // Mantiene las rutas relativas main/roms/** y assets/** dentro del APK.
++            // SonicAdvanceActivity las copia al directorio
++            // privado de la aplicación antes de iniciar SDL/mGBA.
++            assets.srcDirs += [generatedBundledAssets]
+         }
+     }
+ 
+diff --git a/android/app/src/main/AndroidManifest.xml b/android/app/src/main/AndroidManifest.xml
+index cf85387..99ff13d 100644
+--- a/android/app/src/main/AndroidManifest.xml
++++ b/android/app/src/main/AndroidManifest.xml
+@@ -9,7 +9,7 @@
+         android:supportsRtl="true"
+         android:theme="@android:style/Theme.Material.Light.NoActionBar.Fullscreen">
+         <activity
+-            android:name="org.libsdl.app.SDLActivity"
++            android:name="com.sonicadvancetrilogy.launcher.SonicAdvanceActivity"
+             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode|density|navigation"
+             android:exported="true"
+             android:hardwareAccelerated="true"
+diff --git a/android/app/src/main/java/com/sonicadvancetrilogy/launcher/SonicAdvanceActivity.java b/android/app/src/main/java/com/sonicadvancetrilogy/launcher/SonicAdvanceActivity.java
+new file mode 100644
+index 0000000..ab9f005
+--- /dev/null
++++ b/android/app/src/main/java/com/sonicadvancetrilogy/launcher/SonicAdvanceActivity.java
+@@ -0,0 +1,105 @@
++package com.sonicadvancetrilogy.launcher;
++
++import android.os.Bundle;
++import android.util.Log;
++
++import org.libsdl.app.SDLActivity;
++
++import java.io.File;
++import java.io.FileOutputStream;
++import java.io.IOException;
++import java.io.InputStream;
++import java.io.OutputStream;
++
++/**
++ * Copia al directorio escribible de la app los recursos versionados que se
++ * empaquetan desde dist/. La copia ocurre ANTES de iniciar SDL_main para que
++ * el launcher encuentre las ROMs y los PNG al crear App.
++ *
++ * Solo crea archivos ausentes; nunca sobrescribe ROMs, partidas, configuración
++ * ni recursos que el usuario ya tenga en su directorio de datos.
++ */
++public final class SonicAdvanceActivity extends SDLActivity {
++    private static final String TAG = "SonicAdvanceTrilogy";
++
++    @Override
++    protected void onCreate(Bundle savedInstanceState) {
++        bootstrapBundledContent();
++        super.onCreate(savedInstanceState);
++    }
++
++    private void bootstrapBundledContent() {
++        File appBase = getExternalFilesDir(null);
++        if (appBase == null) {
++            appBase = getFilesDir();
++        }
++        if (appBase == null) {
++            Log.e(TAG, "No se pudo localizar el directorio de datos para copiar ROMs/assets");
++            return;
++        }
++
++        copyAssetTree("main/roms", new File(appBase, "main/roms"));
++        copyAssetTree("assets", new File(appBase, "assets"));
++        Log.i(TAG, "Contenido incluido en el APK preparado en: " + appBase.getAbsolutePath());
++    }
++
++    /** Copia recursivamente desde assets del APK, preservando rutas relativas. */
++    private void copyAssetTree(String assetPath, File target) {
++        final String[] children;
++        try {
++            children = getAssets().list(assetPath);
++        } catch (IOException e) {
++            Log.w(TAG, "No se pudo listar el contenido empaquetado " + assetPath, e);
++            return;
++        }
++
++        if (children != null && children.length > 0) {
++            if (!target.exists() && !target.mkdirs() && !target.isDirectory()) {
++                Log.e(TAG, "No se pudo crear el directorio " + target.getAbsolutePath());
++                return;
++            }
++            for (String child : children) {
++                copyAssetTree(assetPath + "/" + child, new File(target, child));
++            }
++            return;
++        }
++
++        // Un recurso hoja tiene una lista vacía; los ficheros existentes se respetan.
++        if (target.exists()) {
++            return;
++        }
++        File parent = target.getParentFile();
++        if (parent != null && !parent.isDirectory() && !parent.mkdirs() && !parent.isDirectory()) {
++            Log.e(TAG, "No se pudo crear el directorio " + parent.getAbsolutePath());
++            return;
++        }
++
++        File temporary = new File(target.getAbsolutePath() + ".tmp");
++        try (InputStream input = getAssets().open(assetPath);
++             OutputStream output = new FileOutputStream(temporary)) {
++            byte[] buffer = new byte[32 * 1024];
++            int count;
++            while ((count = input.read(buffer)) != -1) {
++                output.write(buffer, 0, count);
++            }
++            output.flush();
++        } catch (IOException e) {
++            // Puede ser un directorio vacío en assets; no bloqueamos el inicio del juego.
++            // Los errores de recursos no encontrados quedan visibles en logcat.
++            if (temporary.exists()) {
++                //noinspection ResultOfMethodCallIgnored
++                temporary.delete();
++            }
++            Log.w(TAG, "No se pudo copiar el recurso empaquetado " + assetPath, e);
++            return;
++        }
++
++        if (!temporary.renameTo(target)) {
++            //noinspection ResultOfMethodCallIgnored
++            temporary.delete();
++            Log.e(TAG, "No se pudo instalar el recurso " + target.getAbsolutePath());
++        } else {
++            Log.d(TAG, "Instalado desde el APK: " + assetPath);
++        }
++    }
++}

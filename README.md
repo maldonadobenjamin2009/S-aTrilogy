@@ -48,7 +48,7 @@ Sin CMake (Linux/macOS/MSYS2): `make` (necesita `sdl2-config` o `pkg-config`). P
 
 Hay un proyecto Android Studio en `android/` con Gradle + NDK + CMake. Abre esa carpeta en Android Studio para compilar el APK; en el primer sync se descargan las fuentes oficiales de SDL2 2.30.9. También existe un workflow `.github/workflows/android.yml` que compila y publica el APK debug como artefacto de Actions.
 
-La versión Android se ejecuta en horizontal e incluye controles táctiles semitransparentes: cruceta izquierda, A/B a la derecha, L/R en las esquinas superiores, botón de pausa en el centro superior y SELECT/START abajo al centro. Los controles táctiles emiten eventos SDL de mando, y los mandos Bluetooth siguen disponibles. Las ROMs propias deben copiarse a `Android/data/com.sonicadvancetrilogy.launcher/files/main/roms/`; las instrucciones completas están en `android/README.md`.
+La versión Android se ejecuta en horizontal e incluye controles táctiles semitransparentes: cruceta izquierda, A/B a la derecha, L/R en las esquinas superiores, botón de pausa en el centro superior y SELECT/START abajo al centro. Los controles táctiles emiten eventos SDL de mando, y los mandos Bluetooth siguen disponibles. La compilación Android empaqueta `dist/main/roms/` y `dist/assets/` dentro del APK y copia los recursos que falten a los datos privados de la aplicación en el primer inicio; las instrucciones completas están en `android/README.md`.
 
 **Limitación de esta revisión:** no se generó un APK aquí porque este entorno no tiene Android SDK/NDK ni acceso a la descarga inicial de SDL2. El proyecto Android Studio y su workflow de compilación quedaron añadidos, pero es necesario validar la primera compilación con el SDK real.
 

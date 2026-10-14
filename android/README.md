@@ -17,9 +17,13 @@ La actividad usa SDL2 oficial, y `src/main_sdl.c` dibuja controles táctiles mie
 
 El proyecto compila las fuentes del launcher y mGBA desde el `CMakeLists.txt` de la raíz; no hace falta mantener una segunda copia del núcleo.
 
-## ROMs y guardados
+## ROMs y assets incluidos en el APK
 
-Android usa el directorio privado de archivos de la aplicación. Coloca las ROMs que poseas en:
+La compilación incorpora automáticamente el contenido de `dist/main/roms/` y `dist/assets/` dentro de los assets del APK. Al iniciar, `SonicAdvanceActivity` copia los archivos empaquetados que falten al directorio de datos de la app antes de arrancar SDL/mGBA. Así, la primera ejecución encuentra las ROMs y las imágenes sin tener que copiarlas manualmente. La copia no sobrescribe archivos existentes, por lo que se conservan tus partidas, configuraciones y recursos personalizados.
+
+La tarea `verifyBundledGameData` hace fallar la compilación si el checkout no contiene al menos una ROM (`.gba`, `.gbc` o `.gb`) y una imagen compatible en `dist/assets/`. Si el workflow falla en esa comprobación, revisa que esos archivos estén realmente rastreados en Git y disponibles en la rama que se compila.
+
+Los archivos incluidos se copian al directorio privado de la aplicación. También puedes añadir o reemplazar tus propias ROMs en:
 
 `Android/data/com.sonicadvancetrilogy.launcher/files/main/roms/`
 
@@ -46,5 +50,5 @@ Los controles táctiles emiten eventos de mando SDL y pueden coexistir con un ma
 ## Limitaciones conocidas
 
 - Este entorno de edición no incluye Android SDK/NDK ni conexión de descarga, por lo que el APK no se ha podido compilar aquí. La compilación debe verificarse en Android Studio.
-- La importación de ROMs se realiza copiando archivos a la carpeta de la app; no se incluye todavía un selector Android de archivos.
+- No se incluye todavía un selector Android de archivos; las ROMs presentes en `dist/main/roms/` se empaquetan con el APK automáticamente.
 - El modo de pantalla dividida queda disponible si conectas un mando compatible; los controles táctiles son para J1.

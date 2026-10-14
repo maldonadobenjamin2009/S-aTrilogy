@@ -9,7 +9,7 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar.Fullscreen">
         <activity
-            android:name="org.libsdl.app.SDLActivity"
+            android:name="com.sonicadvancetrilogy.launcher.SonicAdvanceActivity"
             android:configChanges="keyboard|keyboardHidden|orientation|screenSize|uiMode|density|navigation"
             android:exported="true"
             android:hardwareAccelerated="true"
