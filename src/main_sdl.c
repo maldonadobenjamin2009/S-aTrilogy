@@ -74,6 +74,9 @@ static void h_open_folder(void* u, const char* path) {
 #elif defined(__ANDROID__)
 	/* Android no permite abrir una ruta arbitraria como carpeta mediante SDL. */
 	(void) path;
+#elif defined(__ORBIS__) || defined(PS4)
+	/* En PS4 homebrew no hay un explorador de carpetas de escritorio que lanzar. */
+	(void) path;
 #elif defined(__APPLE__)
 	char cmd[1200]; snprintf(cmd, sizeof(cmd), "open \"%s\" &", path); if (system(cmd)) {}
 #else
@@ -616,6 +619,11 @@ int APP_ENTRY(int argc, char** argv) {
 		size_t n = strlen(base);
 		while (n > 1 && (base[n - 1] == '/' || base[n - 1] == '\\')) base[--n] = 0;
 		SDL_free(bp);
+	} else {
+#if defined(__ORBIS__) || defined(PS4)
+		/* Dentro del PKG los recursos se leen desde app0 aunque el cwd sea distinto. */
+		snprintf(base, sizeof(base), "/app0");
+#endif
 	}
 #endif
 
@@ -623,6 +631,9 @@ int APP_ENTRY(int argc, char** argv) {
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_ALLOW_HIGHDPI);
+#elif defined(__ORBIS__) || defined(PS4)
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1920, 1080, SDL_WINDOW_FULLSCREEN);
 #else
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy Launcher", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 #endif
@@ -691,6 +702,11 @@ int APP_ENTRY(int argc, char** argv) {
 
 	host.open_folder = h_open_folder; host.set_fullscreen = h_fullscreen; host.set_title = h_title;
 	host.set_cursor_visible = h_cursor; host.key_name = h_key_name;
+#if defined(__ORBIS__) || defined(PS4)
+	/* /app0 es contenido instalado y no debe usarse para partidas/configuración. */
+	static char ps4_user_data_base[] = "/data/SonicAdvanceTrilogy";
+	host.user_data_dir = ps4_user_data_base;
+#endif
 	for (int i = 0; i < SDL_NumJoysticks(); i++) open_pad(i);
 	debug_log_info("Mandos reconocidos al iniciar: %d", opened_pad_count());
 

@@ -941,15 +941,22 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	if (!a) return NULL;
 	if (host) a->host = *host;
 	snprintf(a->base, sizeof(a->base), "%s", base_dir);
-	char main_dir[PATH_MAX_APP], bios_dir[PATH_MAX_APP], txt[PATH_MAX_APP + 40];
-	snprintf(main_dir, sizeof(main_dir), "%s/main", a->base);
-	snprintf(a->roms_dir, sizeof(a->roms_dir), "%s/roms", main_dir);
-	snprintf(a->saves_dir, sizeof(a->saves_dir), "%s/saves", main_dir);
-	snprintf(bios_dir, sizeof(bios_dir), "%s/bios", main_dir);
+	/* Los recursos instalados (ROMs/assets) pueden estar en una carpeta de solo lectura.
+	 * Las partidas y ajustes usan user_data_dir cuando la plataforma lo proporciona. */
+	const char* data_base = (host && host->user_data_dir && host->user_data_dir[0])
+		? host->user_data_dir : base_dir;
+	char resource_main_dir[PATH_MAX_APP], data_main_dir[PATH_MAX_APP];
+	char bios_dir[PATH_MAX_APP], txt[PATH_MAX_APP + 40];
+	snprintf(resource_main_dir, sizeof(resource_main_dir), "%s/main", a->base);
+	snprintf(a->roms_dir, sizeof(a->roms_dir), "%s/roms", resource_main_dir);
+	snprintf(data_main_dir, sizeof(data_main_dir), "%s/main", data_base);
+	snprintf(a->saves_dir, sizeof(a->saves_dir), "%s/saves", data_main_dir);
+	snprintf(bios_dir, sizeof(bios_dir), "%s/bios", data_main_dir);
 	snprintf(a->bios_file, sizeof(a->bios_file), "%s/gba_bios.bin", bios_dir);
-	snprintf(a->cfg_path, sizeof(a->cfg_path), "%s/config.txt", main_dir);
+	snprintf(a->cfg_path, sizeof(a->cfg_path), "%s/config.txt", data_main_dir);
 	snprintf(a->assets_dir, sizeof(a->assets_dir), "%s/assets", a->base);
 	snprintf(a->games_art_dir, sizeof(a->games_art_dir), "%s/games", a->assets_dir);
+	/* ROMs/assets vienen empaquetados; intentar mkdir en ellos es inocuo si /app0 es read-only. */
 	sys_mkdir_p(a->roms_dir); sys_mkdir_p(a->saves_dir); sys_mkdir_p(bios_dir); sys_mkdir_p(a->games_art_dir);
 	snprintf(txt, sizeof(txt), "%s/NOMBRES_DE_LAS_ROMS.txt", a->roms_dir);
 	write_if_missing(txt, NAMES_TXT);

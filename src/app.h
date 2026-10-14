@@ -42,6 +42,7 @@ typedef struct {
 	int has_audio;
 	const char* audio_info;
 	const char* video_info;
+	const char* user_data_dir; /* opcional: rutas escribibles para partidas/configuración; NULL usa base_dir */
 } AppHost;
 
 typedef struct {

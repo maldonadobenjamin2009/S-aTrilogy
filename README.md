@@ -52,6 +52,15 @@ La versión Android se ejecuta en horizontal e incluye controles táctiles semit
 
 **Limitación de esta revisión:** no se generó un APK aquí porque este entorno no tiene Android SDK/NDK ni acceso a la descarga inicial de SDL2. El proyecto Android Studio y su workflow de compilación quedaron añadidos, pero es necesario validar la primera compilación con el SDK real.
 
+
+## PS4 PKG (homebrew con OpenOrbis)
+
+Hay un flujo experimental de compilación de un paquete `.pkg` usando el toolchain abierto OpenOrbis y su paquete SDL2 para PS4. El workflow `.github/workflows/ps4-pkg.yml` se puede iniciar desde **Actions → PS4 PKG (OpenOrbis homebrew) → Run workflow**; también se dispara al cambiar código, `dist/` o `ps4/` en `main`/`master`. Debe tener disponibles en el checkout las ROMs propias en `dist/main/roms/` y los recursos en `dist/assets/` (se admite Git LFS).
+
+La compilación produce `build-ps4/SonicAdvanceTrilogy-PS4.pkg` como artefacto de Actions. El PKG es una compilación homebrew de desarrollo; no es un paquete comercial firmado por Sony ni se espera que instale en una PS4 retail sin soporte homebrew. No incluye métodos para modificar el firmware de la consola.
+
+El frontend conserva los recursos de solo lectura en la carpeta del paquete (`/app0/main/roms`, `/app0/assets`) y guarda configuración, BIOS opcional y partidas bajo `/data/SonicAdvanceTrilogy/main/`. Se reutiliza SDL2 de OpenOrbis y el empaquetador `create-fself`/`create-gp4`/`PkgTool.Core` del toolchain. Este entorno de desarrollo no dispone del SDK de OpenOrbis, por lo que el nuevo target todavía necesita validación mediante una ejecución real de Actions; el flujo comprobará dependencias y recursos faltantes y fallará mostrando el error de compilación concreto.
+
 ## Estado de las pruebas
 
 Probado en Linux x86-64: núcleo, interfaz, pausa, ranuras, remapeo, aviso Sí/No para dos mandos y flujo de pantalla dividida con `headless_test`. También se ejecutó una prueba directa de cable link que avanza dos núcleos, guarda/carga sus estados y cierra las instancias.

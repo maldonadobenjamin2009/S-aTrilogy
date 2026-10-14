@@ -25,10 +25,8 @@ llamadas al sistema operativo. Cada plataforma solo implementa un **archivo de p
 
 **Pendiente de validación física:** este entorno no tiene Android SDK/NDK ni conexión a Internet para descargar SDL2, así que el APK aún debe compilarse y probarse desde Android Studio o GitHub Actions.
 
-## PS4 (homebrew, requiere consola con jailbreak)
-* Toolchain: OpenOrbis (C/C++, clang). `launcher_core` y mGBA no usan hilos (`DISABLE_THREADING`) ni librerías externas.
-* Escribe `platform_ps4.c`: vídeo con `sceVideoOut` (el lienzo ya es un buffer ARGB por software, solo hay que copiarlo
-  y escalar el fotograma del juego), mando con `scePad` (mapea sus bits a los `PAD_*` de `keys.h`: Cruz→0, Círculo→1,
-  Cuadrado→2, Triángulo→3, Share→4, Options→6, L1→9, R1→10, cruceta→11-14, L2/R2→100/101 o eje 4/5, panel táctil→20),
-  audio con `sceAudioOut` (48 kHz s16 estéreo) y rutas bajo `/data/...`.
-* Compila las fuentes de mGBA con las mismas `-D` del Makefile. Sin probar: la PS4 no se ha tocado todavía.
+## PS4 (homebrew experimental con OpenOrbis)
+* Hay un Makefile en `ps4/Makefile` y un workflow en `.github/workflows/ps4-pkg.yml`; se usa el port SDL2 incluido en el toolchain OpenOrbis v0.5.3 para evitar crear una capa de plataforma `sceVideoOut` desde cero.
+* El paquete deja las ROMs y assets bajo `/app0/main/roms` y `/app0/assets`, y usa `/data/SonicAdvanceTrilogy/main` para partidas/configuración/BIOS opcional.
+* `make -f ps4/Makefile` desde la raíz compila el ELF, crea `eboot.bin` y empaqueta `SonicAdvanceTrilogy-PS4.pkg`. Requiere OpenOrbis y SDL2 de la distribución; la compilación aún debe validarse con una ejecución real del workflow y hardware compatible.
+* El PKG está dirigido a entornos de desarrollo/homebrew compatibles; no es un paquete comercial firmado por Sony.

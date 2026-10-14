@@ -5,3 +5,9 @@ android/local.properties
 android/**/build/
 android/.idea/
 *.iml
+# Native / PS4 build outputs and transient headless-test fixtures
+/build/
+/bin/
+/build-ps4/
+/ht_work/
+*.pkg

@@ -1,0 +1,50 @@
+name: PS4 PKG (OpenOrbis homebrew)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'src/**'
+      - 'third_party/**'
+      - 'dist/**'
+      - 'ps4/**'
+      - '.github/workflows/ps4-pkg.yml'
+      - 'CMakeLists.txt'
+
+jobs:
+  build-ps4-pkg:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source and tracked ROM/assets (Git LFS)
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Check package inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d dist/main/roms
+          test -d dist/assets
+          count=$(find dist/main/roms -type f \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) | wc -l)
+          if [ "$count" -eq 0 ]; then
+            echo "::error::No tracked ROM files found under dist/main/roms. Ensure Git LFS assets are available to Actions."
+            exit 1
+          fi
+          test -f ps4/sce_sys/icon0.png
+          echo "ROMs included in package: $count"
+
+      - name: Build PS4 ELF and PKG with OpenOrbis
+        uses: OpenOrbis/toolchain-action@main
+        with:
+          version: v0.5.3
+          command: make -f ps4/Makefile
+
+      - name: Upload PS4 PKG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SonicAdvanceTrilogy-PS4-PKG
+          path: build-ps4/SonicAdvanceTrilogy-PS4.pkg
+          if-no-files-found: error
+          retention-days: 14
