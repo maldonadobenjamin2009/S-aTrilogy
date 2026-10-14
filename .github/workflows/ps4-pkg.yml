@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates curl tar
           git lfs install --system
 
       - name: Checkout source and tracked ROM/assets (Git LFS)
@@ -35,27 +35,70 @@ jobs:
           lfs: true
           fetch-depth: 1
 
-      - name: Verify OpenOrbis package tools and runtime modules
+      - name: Prepare and verify OpenOrbis packaging tools
         shell: bash
         run: |
           set -euo pipefail
-          : "${OO_PS4_TOOLCHAIN:?OpenOrbis container did not set OO_PS4_TOOLCHAIN}"
+          SDK="${OO_PS4_TOOLCHAIN:-/lib/OpenOrbisSDK}"
+          if [ ! -d "$SDK" ]; then
+            echo "::error::OpenOrbis SDK directory not found: $SDK"
+            echo "Available SDK directories (diagnostic):"
+            find /lib /opt /usr/local -maxdepth 4 -type d -name OpenOrbisSDK -print 2>/dev/null || true
+            exit 1
+          fi
+          export OO_PS4_TOOLCHAIN="$SDK"
+          TOOLS="$SDK/bin/linux"
+          mkdir -p "$TOOLS"
+
+          # Some published toolchain archives lose executable bits when extracted.
+          # Repair permissions on existing command-line tools before checking them.
+          if [ -d "$TOOLS" ]; then
+            find "$TOOLS" -maxdepth 1 -type f -exec chmod u+x {} +
+          fi
+
+          # The container's SDK release may omit create-fself. Build the official
+          # upstream v1.3 source as a deterministic fallback rather than failing
+          # immediately at the preflight check.
+          if [ ! -f "$TOOLS/create-fself" ]; then
+            echo "create-fself is absent; building official OpenOrbis/create-fself v1.3"
+            if ! command -v go >/dev/null 2>&1; then
+              GO_VERSION="1.22.12"
+              curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-amd64.tar.gz" -o /tmp/go-linux-amd64.tar.gz
+              rm -rf /usr/local/go
+              tar -xzf /tmp/go-linux-amd64.tar.gz -C /usr/local
+              export PATH="/usr/local/go/bin:$PATH"
+            fi
+            TMP_FSELF="$(mktemp -d)"
+            git clone --depth 1 --branch v1.3 https://github.com/OpenOrbis/create-fself.git "$TMP_FSELF/create-fself"
+            (
+              cd "$TMP_FSELF/create-fself/cmd/create-fself"
+              GOTOOLCHAIN=local go build -modfile=go-linux.mod -o "$TOOLS/create-fself"
+            )
+            rm -rf "$TMP_FSELF"
+          fi
+          [ -f "$TOOLS/create-fself" ] && chmod u+x "$TOOLS/create-fself"
+
+          # Show actual paths and permissions so a future SDK-layout mismatch is diagnosable.
+          echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
+          echo "Linux packaging tools: $TOOLS"
+          ls -la "$TOOLS"
           for tool in create-fself create-gp4 PkgTool.Core; do
-            if [ ! -x "$OO_PS4_TOOLCHAIN/bin/linux/$tool" ]; then
-              echo "::error::OpenOrbis tool not found or not executable: $OO_PS4_TOOLCHAIN/bin/linux/$tool"
+            if [ ! -x "$TOOLS/$tool" ]; then
+              echo "::error::OpenOrbis tool is missing or not executable: $TOOLS/$tool"
+              echo "Tool directory contents:"
+              ls -la "$TOOLS" || true
               exit 1
             fi
           done
-          # The official Docker image installs SDK files, not the sample tree.
+
           # Runtime modules are shipped under bin/data/modules in the SDK release.
           for module in libc.prx libSceFios2.prx; do
-            if [ ! -f "$OO_PS4_TOOLCHAIN/bin/data/modules/$module" ]; then
-              echo "::error::Required OpenOrbis runtime module is missing: $OO_PS4_TOOLCHAIN/bin/data/modules/$module"
+            if [ ! -f "$SDK/bin/data/modules/$module" ]; then
+              echo "::error::Required OpenOrbis runtime module is missing: $SDK/bin/data/modules/$module"
               exit 1
             fi
           done
-          echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
-          ls -l "$OO_PS4_TOOLCHAIN/bin/data/modules/libc.prx" "$OO_PS4_TOOLCHAIN/bin/data/modules/libSceFios2.prx"
+          ls -l "$SDK/bin/data/modules/libc.prx" "$SDK/bin/data/modules/libSceFios2.prx"
 
       - name: Check package inputs
         shell: bash
