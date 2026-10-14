@@ -20,12 +20,12 @@ cp -a dist/assets/. "$STAGE/assets/"
 cp ps4/sce_sys/icon0.png "$STAGE/sce_sys/icon0.png"
 
 SAMPLE="$SDK/samples/SDL2"
-if [ ! -d "$SAMPLE/sce_module" ] || [ ! -f "$SAMPLE/sce_sys/about/right.sprx" ]; then
+if [ ! -d "$SAMPLE/sce_module" ] || [ ! -f "$SAMPLE/sce_sys/about/right.prx" ]; then
   echo "ERROR: el toolchain no contiene samples/SDL2 con módulos de soporte" >&2
   exit 1
 fi
 cp -a "$SAMPLE/sce_module/." "$STAGE/sce_module/"
-cp "$SAMPLE/sce_sys/about/right.sprx" "$STAGE/sce_sys/about/right.sprx"
+cp "$SAMPLE/sce_sys/about/right.prx" "$STAGE/sce_sys/about/right.prx"
 
 # Convert ELF to the executable format used by PS4 homebrew packages.
 (

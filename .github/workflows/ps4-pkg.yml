@@ -15,11 +15,46 @@ on:
 jobs:
   build-ps4-pkg:
     runs-on: ubuntu-latest
+    # OpenOrbis documents this image as its supported Docker-based workflow.
+    # Use the image directly instead of the non-existent openorbis/toolchain-action.
+    container:
+      image: openorbisofficial/toolchain:latest
+      options: --user root
     steps:
+      - name: Install Git and Git LFS in the toolchain container
+        shell: bash
+        run: |
+          set -euo pipefail
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates
+          git lfs install --system
+
       - name: Checkout source and tracked ROM/assets (Git LFS)
         uses: actions/checkout@v4
         with:
           lfs: true
+          fetch-depth: 1
+
+      - name: Checkout matching OpenOrbis sample packaging files
+        uses: actions/checkout@v4
+        with:
+          repository: OpenOrbis/OpenOrbis-PS4-Toolchain
+          ref: v0.5.4
+          path: _openorbis-source
+          fetch-depth: 1
+
+      - name: Prepare OpenOrbis SDL2 sample package support files
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${OO_PS4_TOOLCHAIN:?OpenOrbis container did not set OO_PS4_TOOLCHAIN}"
+          mkdir -p "$OO_PS4_TOOLCHAIN/samples/SDL2"
+          cp -a _openorbis-source/samples/SDL2/. "$OO_PS4_TOOLCHAIN/samples/SDL2/"
+          test -f "$OO_PS4_TOOLCHAIN/samples/SDL2/sce_sys/about/right.prx"
+          test -d "$OO_PS4_TOOLCHAIN/samples/SDL2/sce_module"
+          test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-fself"
+          test -x "$OO_PS4_TOOLCHAIN/bin/linux/create-gp4"
+          test -x "$OO_PS4_TOOLCHAIN/bin/linux/PkgTool.Core"
 
       - name: Check package inputs
         shell: bash
@@ -33,13 +68,13 @@ jobs:
             exit 1
           fi
           test -f ps4/sce_sys/icon0.png
+          test -f "$OO_PS4_TOOLCHAIN/lib/libSDL2.a"
           echo "ROMs included in package: $count"
+          echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
 
       - name: Build PS4 ELF and PKG with OpenOrbis
-        uses: OpenOrbis/toolchain-action@main
-        with:
-          version: v0.5.3
-          command: make -f ps4/Makefile
+        shell: bash
+        run: make -f ps4/Makefile
 
       - name: Upload PS4 PKG artifact
         uses: actions/upload-artifact@v4
