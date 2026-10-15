@@ -105,6 +105,9 @@ void key_label(const App* a, int code, char* out, size_t n) {
 	case K_F5: snprintf(out, n, "F5"); return;
 	case K_F8: snprintf(out, n, "F8"); return;
 	case K_F11: snprintf(out, n, "F11"); return;
+	case K_RCTRL: snprintf(out, n, "Ctrl derecho"); return;
+	case K_RSHIFT: snprintf(out, n, "Shift derecho"); return;
+	case K_RALT: snprintf(out, n, "AltGr"); return;
 	default: break;
 	}
 	if (code > 32 && code < 127) { snprintf(out, n, "%c", toupper(code)); return; }
@@ -415,7 +418,7 @@ static uint32_t dual_keyboard_mask(const App* a, int player) {
 	return m;
 }
 static uint32_t keymask(const App* a) {
-	uint32_t m = a->emu2 ? dual_keyboard_mask(a, 0) : 0;
+	uint32_t m = (a->emu2 && a->pad_count == 0) ? dual_keyboard_mask(a, 0) : 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
 		if (!a->emu2) {
@@ -432,7 +435,7 @@ static int pressed_id2(const App* a, int id) {
 	return (id == PAD_L2 && a->p2_trig[0]) || (id == PAD_R2 && a->p2_trig[1]);
 }
 static uint32_t keymask2(const App* a) {
-	uint32_t m = a->emu2 ? dual_keyboard_mask(a, 1) : 0;
+	uint32_t m = (a->emu2 && a->pad_count == 0) ? dual_keyboard_mask(a, 1) : 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
 		if (pressed_id2(a, a->cfg.pad[1][i])) m |= 1u << GBA_BIT[i];
@@ -743,6 +746,14 @@ static void on_pad_button(App* a, int id, int down, int player) {
 
 static void on_pad_axis(App* a, int axis, int value, int player) {
 	float v = value / 32768.0f;
+	if (axis == 4 || axis == 5) {
+		int down = v > 0.5f;
+		if (down && a->capture_kind == player + 1) {
+			assign(a, player + 1, a->capture_act, PAD_L2 + axis - 4);
+			a->capture_kind = -1;
+			return;
+		}
+	}
 	if (player == 1) {
 		if (a->state != ST_GAME || !a->emu2) return;
 		if (axis == 0 || axis == 1) {
@@ -762,8 +773,7 @@ static void on_pad_axis(App* a, int axis, int value, int player) {
 		int i = axis - 4, down = v > 0.5f;
 		if (down != a->trig[i]) {
 			a->trig[i] = down;
-			if (a->capture_kind == 1 && down) { assign(a, 1, a->capture_act, PAD_L2 + i); a->capture_kind = -1; }
-			else if (a->state == ST_GAME && down && a->cfg.pad[ACT_PAUSE] == PAD_L2 + i) pause_game(a);
+			if (a->state == ST_GAME && down && a->cfg.pad[0][ACT_PAUSE] == PAD_L2 + i) pause_game(a);
 		}
 	}
 }

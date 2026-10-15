@@ -201,7 +201,7 @@ int main(int argc, char** argv) {
 	CHECK(app->cfg.pad[0][ACT_A] == 7 && app->capture_kind == -1, "A del mando J1 = L3");
 	key(K_RETURN); key(K_ESCAPE); CHECK(app->capture_kind == -1 && app->cfg.pad[0][ACT_A] == 7, "Esc cancela");
 	key(K_DELETE); CHECK(app->cfg.pad[0][ACT_A] == -1, "Supr borra el mapa del mando J1");
-	app->ctrl_row = 0; key(K_RIGHT); key(K_RIGHT); key(K_RETURN);
+	app->ctrl_row = 0; app->ctrl_col = 0; key(K_RIGHT); key(K_RIGHT); key(K_RETURN);
 	CHECK(app->capture_kind == 2, "esperando botón del mando J2");
 	AppEvent j2down = {EV_PAD_DOWN, 8, 0, 1}, j2up = {EV_PAD_UP, 8, 0, 1};
 	app_event(app, &j2down); app_event(app, &j2up);
