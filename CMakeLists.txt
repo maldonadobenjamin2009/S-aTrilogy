@@ -60,6 +60,10 @@ target_compile_definitions(emu_core PRIVATE
 if(WIN32)
   target_compile_definitions(emu_core PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64)
   target_link_libraries(emu_core PUBLIC ws2_32 shlwapi)
+elseif(EMSCRIPTEN)
+  # El build web no usa pthreads: GitHub Pages no configura SharedArrayBuffer.
+  # El multijugador por cable link se mantiene fuera del port de navegador.
+  target_compile_definitions(emu_core PRIVATE _GNU_SOURCE HAVE_LOCALE)
 elseif(APPLE)
   target_compile_definitions(emu_core PRIVATE USE_PTHREADS _DARWIN_C_SOURCE HAVE_LOCALE HAVE_XLOCALE HAVE_SNPRINTF_L HAVE_STRTOF_L)
   find_package(Threads REQUIRED)
@@ -129,33 +133,56 @@ if(ANDROID)
 endif()
 
 # ---------------------------------------------------------------------------------------
-# Plataforma de escritorio (SDL2). Si SDL2 no está instalado se descarga y compila (hace falta internet).
+# WebAssembly: SDL2 web oficial de Emscripten + plantilla HTML y recursos empaquetados.
+# Escritorio: SDL2 nativo (se descarga si no está instalado).
 # ---------------------------------------------------------------------------------------
-find_package(SDL2 CONFIG QUIET)
-if(NOT SDL2_FOUND)
-  message(STATUS "SDL2 no encontrado: se descargará y compilará con FetchContent")
-  include(FetchContent)
-  set(SDL_SHARED OFF CACHE BOOL "" FORCE)
-  set(SDL_STATIC ON CACHE BOOL "" FORCE)
-  set(SDL_TEST OFF CACHE BOOL "" FORCE)
-  FetchContent_Declare(SDL2 URL https://github.com/libsdl-org/SDL/releases/download/release-2.30.9/SDL2-2.30.9.tar.gz)
-  FetchContent_MakeAvailable(SDL2)
-endif()
-if(TARGET SDL2::SDL2)
-  set(SDL_TARGET SDL2::SDL2)
-elseif(TARGET SDL2::SDL2-static)
-  set(SDL_TARGET SDL2::SDL2-static)
-elseif(TARGET SDL2-static)
-  set(SDL_TARGET SDL2-static)
+if(EMSCRIPTEN)
+  add_executable(SonicAdvanceTrilogy src/main_sdl.c)
+  # --use-port=sdl2 proporciona tanto las cabeceras como la implementación SDL para navegador.
+  target_compile_options(SonicAdvanceTrilogy PRIVATE --use-port=sdl2 -O2)
+  target_compile_options(emu_core PRIVATE -O2)
+  target_compile_options(launcher_core PRIVATE -O2)
+  target_link_libraries(SonicAdvanceTrilogy PRIVATE launcher_core)
+  target_link_options(SonicAdvanceTrilogy PRIVATE
+    --use-port=sdl2
+    "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
+    "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/dist/assets@/assets"
+    "-sASYNCIFY=1"
+    "-sALLOW_MEMORY_GROWTH=1"
+    "-sFORCE_FILESYSTEM=1"
+    "-sEXPORTED_RUNTIME_METHODS=FS,callMain"
+    "-sEXIT_RUNTIME=0"
+    "-lidbfs.js"
+  )
+  # CMake debe producir exactamente los nombres que publica GitHub Pages.
+  set_target_properties(SonicAdvanceTrilogy PROPERTIES OUTPUT_NAME index SUFFIX ".html")
 else()
-  message(FATAL_ERROR "No se encontró ningún destino de SDL2")
-endif()
-message(STATUS "Usando SDL2: ${SDL_TARGET}")
+  find_package(SDL2 CONFIG QUIET)
+  if(NOT SDL2_FOUND)
+    message(STATUS "SDL2 no encontrado: se descargará y compilará con FetchContent")
+    include(FetchContent)
+    set(SDL_SHARED OFF CACHE BOOL "" FORCE)
+    set(SDL_STATIC ON CACHE BOOL "" FORCE)
+    set(SDL_TEST OFF CACHE BOOL "" FORCE)
+    FetchContent_Declare(SDL2 URL https://github.com/libsdl-org/SDL/releases/download/release-2.30.9/SDL2-2.30.9.tar.gz)
+    FetchContent_MakeAvailable(SDL2)
+  endif()
+  if(TARGET SDL2::SDL2)
+    set(SDL_TARGET SDL2::SDL2)
+  elseif(TARGET SDL2::SDL2-static)
+    set(SDL_TARGET SDL2::SDL2-static)
+  elseif(TARGET SDL2-static)
+    set(SDL_TARGET SDL2-static)
+  else()
+    message(FATAL_ERROR "No se encontró ningún destino de SDL2")
+  endif()
+  message(STATUS "Usando SDL2: ${SDL_TARGET}")
 
-add_executable(SonicAdvanceTrilogy src/main_sdl.c)
-target_link_libraries(SonicAdvanceTrilogy PRIVATE launcher_core ${SDL_TARGET})
-if(WIN32)
-  target_link_options(SonicAdvanceTrilogy PRIVATE -mwindows -static-libgcc)
+  add_executable(SonicAdvanceTrilogy src/main_sdl.c)
+  target_link_libraries(SonicAdvanceTrilogy PRIVATE launcher_core ${SDL_TARGET})
+  if(WIN32)
+    target_link_options(SonicAdvanceTrilogy PRIVATE -mwindows -static-libgcc)
+  endif()
 endif()
 
 install(TARGETS SonicAdvanceTrilogy DESTINATION .)
