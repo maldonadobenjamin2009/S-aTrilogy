@@ -323,8 +323,10 @@ static void start_game(App* a, int i) {
 	snprintf(a->modal_title, sizeof(a->modal_title), "¿CÓMO DESEA JUGAR?");
 	snprintf(a->modal_text, sizeof(a->modal_text),
 	         a->pad_count >= 2
-	           ? "Hay dos mandos detectados. Puedes usarlos o elegir jugar con teclado."
-	           : "El modo 2J también funciona sin mandos: J1 usa WASD y J2 las flechas.");
+	           ? "Se usarán los mandos J1 y J2, configurables por separado en Ajustes > Controles."
+	           : (a->pad_count == 1
+	                ? "J1 usa el mando detectado y J2 el teclado: flechas, A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter."
+	                : "Sin mandos: J1 WASD (A=X, B=Z, Select=1, Start=2); J2 flechas (A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter)."));
 	return;
 #else
 	start_game_now(a, i, 0);
@@ -435,7 +437,8 @@ static int pressed_id2(const App* a, int id) {
 	return (id == PAD_L2 && a->p2_trig[0]) || (id == PAD_R2 && a->p2_trig[1]);
 }
 static uint32_t keymask2(const App* a) {
-	uint32_t m = (a->emu2 && a->pad_count == 0) ? dual_keyboard_mask(a, 1) : 0;
+	/* Si solo hay un mando, J1 lo usa y el teclado queda disponible para J2. */
+	uint32_t m = (a->emu2 && a->pad_count < 2) ? dual_keyboard_mask(a, 1) : 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
 		if (pressed_id2(a, a->cfg.pad[1][i])) m |= 1u << GBA_BIT[i];
