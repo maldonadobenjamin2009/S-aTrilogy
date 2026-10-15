@@ -33,19 +33,32 @@ jobs:
       - name: Compilar el programa C para WebAssembly
         run: cmake --build build-web --target SonicAdvanceTrilogy --parallel 2
 
+      - name: Verificar artefactos de WebAssembly
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Archivos generados por Emscripten:"
+          find build-web -maxdepth 2 -type f \( -name '*.html' -o -name '*.js' -o -name '*.wasm' -o -name '*.data' \) -printf '%p (%s bytes)\\n' | sort
+          for file in index.html index.js index.wasm index.data; do
+            if [[ ! -s "build-web/$file" ]]; then
+              echo "::error::Falta build-web/$file. Salida real de build-web:"
+              find build-web -maxdepth 3 -type f | sort
+              exit 1
+            fi
+          done
+
       - name: Preparar sitio de GitHub Pages
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p site
-          cp build-web/index.html build-web/index.js build-web/index.wasm build-web/index.data site/
-          cp web/launcher.js web/styles.css site/
-          mkdir -p site/licencias
-          cp third_party/mgba/LICENSE site/licencias/mGBA-LICENSE-MPL-2.0.txt
-          cp third_party/DejaVu-LICENSE.txt site/licencias/DejaVu-LICENSE.txt
+          mkdir -p site site/licencias
+          install -m 0644 build-web/index.html build-web/index.js build-web/index.wasm build-web/index.data site/
+          install -m 0644 web/launcher.js web/styles.css site/
+          install -m 0644 third_party/mgba/LICENSE site/licencias/mGBA-LICENSE-MPL-2.0.txt
+          install -m 0644 third_party/DejaVu-LICENSE.txt site/licencias/DejaVu-LICENSE.txt
           touch site/.nojekyll
-          echo "Archivos web compilados:"
-          ls -lh site
+          echo "Archivos web preparados:"
+          find site -maxdepth 3 -type f -printf '%p (%s bytes)\\n' | sort
 
       - name: Cargar artefacto de Pages
         uses: actions/upload-pages-artifact@v3
