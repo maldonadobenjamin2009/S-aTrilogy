@@ -515,9 +515,13 @@ static void controls_action(App* a, int act) {
 	else if (act == A_DOWN) a->ctrl_row = (a->ctrl_row + 1) % n;
 	else if (act == A_LEFT || act == A_RIGHT) {
 		if (a->ctrl_row < ACT_COUNT) {
+#if defined(__EMSCRIPTEN__)
+			a->ctrl_col = act == A_LEFT ? 0 : 1;
+#else
 			a->ctrl_col += act == A_LEFT ? -1 : 1;
 			if (a->ctrl_col < 0) a->ctrl_col = 2;
 			if (a->ctrl_col > 2) a->ctrl_col = 0;
+#endif
 		}
 	}
 	else if (act == A_BACK || act == A_MENU) leave_controls(a);
@@ -791,7 +795,11 @@ static void mouse_move(App* a, int x, int y) {
 			for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) {
 				a->ctrl_row = k;
 				if (k < ACT_COUNT) {
+					#if defined(__EMSCRIPTEN__)
+					for (int col = 0; col < 2; col++)
+#else
 					for (int col = 0; col < 3; col++)
+#endif
 						if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
 				}
 			}
