@@ -3,6 +3,9 @@
  * En Android añade controles táctiles sobre el juego. */
 #define SDL_MAIN_HANDLED
 #include <SDL.h>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
 #if defined(__ANDROID__)
 #include <SDL_system.h>
 #endif
@@ -82,8 +85,8 @@ static void h_open_folder(void* u, const char* path) {
 #elif defined(__ANDROID__)
 	/* Android no permite abrir una ruta arbitraria como carpeta mediante SDL. */
 	(void) path;
-#elif defined(__ORBIS__) || defined(PS4)
-	/* En PS4 homebrew no hay un explorador de carpetas de escritorio que lanzar. */
+#elif defined(__ORBIS__) || defined(PS4) || defined(__EMSCRIPTEN__)
+	/* En consolas y en navegador no hay un explorador de carpetas que lanzar. */
 	(void) path;
 #elif defined(__APPLE__)
 	char cmd[1200]; snprintf(cmd, sizeof(cmd), "open \"%s\" &", path); if (system(cmd)) {}
@@ -655,7 +658,11 @@ int APP_ENTRY(int argc, char** argv) {
 		return 1;
 	}
 	char base[1024] = ".";
-#if defined(__ANDROID__)
+#if defined(__EMSCRIPTEN__)
+	/* Assets empacados por Emscripten viven en /assets. Los ROMs importados
+	 * desde la página se copian a /main/roms, que es la ruta del launcher nativo. */
+	snprintf(base, sizeof(base), ".");
+#elif defined(__ANDROID__)
 	/* Directorio privado de la app en almacenamiento externo: permite importar ROMs
 	 * sin pedir permisos globales de almacenamiento (Android 10+). */
 	const char* android_base = SDL_AndroidGetExternalStoragePath();
@@ -820,6 +827,10 @@ int APP_ENTRY(int argc, char** argv) {
 	/* /app0 es contenido instalado y no debe usarse para partidas/configuración. */
 	static char ps4_user_data_base[] = "/data/SonicAdvanceTrilogy";
 	host.user_data_dir = ps4_user_data_base;
+#elif defined(__EMSCRIPTEN__)
+	/* IDBFS persistirá partidas y configuración sin cambiar la lógica del launcher. */
+	static char web_user_data_base[] = "/persistent";
+	host.user_data_dir = web_user_data_base;
 #endif
 	for (int i = 0; i < SDL_NumJoysticks(); i++) open_pad(i);
 	debug_log_info("Mandos reconocidos al iniciar: %d", opened_pad_count());
@@ -913,7 +924,13 @@ int APP_ENTRY(int argc, char** argv) {
 #else
 		next += app_frame_time(app);
 		double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
-#if defined(__ANDROID__)
+#if defined(__EMSCRIPTEN__)
+		/* Un bucle infinito no puede retener el hilo principal del navegador.
+		 * Asyncify permite suspender aquí y devolver el control a eventos/repintado. */
+		if (delay > 0.001) emscripten_sleep((unsigned int) (delay * 1000.0));
+		else emscripten_sleep(0);
+		if (delay < -0.25) next = SDL_GetPerformanceCounter() / freq;
+#elif defined(__ANDROID__)
 		/* Sin spin-wait en móviles: dormir casi todo el intervalo reduce consumo,
 		 * pero el reloj fijo mantiene la emulación en torno a 59,7 FPS incluso
 		 * en pantallas de 90/120 Hz. */

@@ -312,6 +312,7 @@ static void start_game_now(App* a, int i, int multiplayer) {
 
 static void start_game(App* a, int i) {
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
+#if !defined(__EMSCRIPTEN__)
 	if (a->pad_count >= 2) {
 		a->modal = 1;
 		a->modal_kind = 1;
@@ -321,6 +322,7 @@ static void start_game(App* a, int i) {
 		snprintf(a->modal_text, sizeof(a->modal_text), "Se ha detectado otro mando más conectado, ¿quieres jugar a pantalla dividida?");
 		return;
 	}
+#endif
 	start_game_now(a, i, 0);
 }
 
