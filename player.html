@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#05070d">
+  <title>Jugador GBA — Sonic Advance Trilogy</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #05070d; color: #eaf4ff; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #05070d; }
+    #game { width: 100%; height: 100%; min-height: 0; background: #000; }
+    #loading { position: fixed; inset: 0; z-index: 10; display: grid; place-content: center; gap: 12px; padding: 24px; text-align: center; background: #05070d; color: #eaf4ff; }
+    #loading[hidden] { display: none; }
+    .spinner { width: 36px; height: 36px; margin: 0 auto; border: 3px solid #24344c; border-top-color: #53e4ff; border-radius: 50%; animation: spin .8s linear infinite; }
+    h1 { margin: 0; font-size: 16px; letter-spacing: .05em; }
+    p { margin: 0; max-width: 440px; color: #9baac1; font-size: 12px; line-height: 1.65; }
+    #loading.error .spinner { display: none; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+  </style>
+</head>
+<body>
+  <div id="game" aria-label="Emulador de Game Boy Advance"></div>
+  <div id="loading" role="status" aria-live="polite">
+    <div class="spinner" aria-hidden="true"></div>
+    <h1 id="loading-title">Preparando el emulador…</h1>
+    <p id="loading-message">Descargando el motor web. La primera carga puede tardar un poco; mantené la conexión a internet.</p>
+  </div>
+
+  <script>
+    (() => {
+      'use strict';
+      const params = new URLSearchParams(window.location.search);
+      const romUrl = params.get('rom');
+      const gameName = params.get('name') || 'Sonic Advance Trilogy';
+      const loading = document.getElementById('loading');
+      const loadingTitle = document.getElementById('loading-title');
+      const loadingMessage = document.getElementById('loading-message');
+      const game = document.getElementById('game');
+
+      function showError(title, message) {
+        loading.classList.add('error');
+        loadingTitle.textContent = title;
+        loadingMessage.textContent = message;
+        loading.hidden = false;
+      }
+
+      // Este jugador está diseñado para archivos escogidos localmente desde el hub.
+      // No acepta URLs externas como fuente de ROM.
+      if (!romUrl || !romUrl.startsWith('blob:')) {
+        showError('No se seleccionó una ROM', 'Volvé al portal y elegí un archivo .gba de tu equipo.');
+        return;
+      }
+
+      window.EJS_player = '#game';
+      window.EJS_core = 'gba';
+      window.EJS_gameUrl = romUrl;
+      window.EJS_gameName = gameName;
+      window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+      window.EJS_language = 'es-ES';
+      window.EJS_disableAutoLang = true;
+      window.EJS_startOnLoaded = true;
+      window.EJS_fullscreenOnLoaded = false;
+      window.EJS_volume = 0.7;
+      window.EJS_color = '#53e4ff';
+      window.EJS_backgroundColor = '#05070d';
+
+      const observer = new MutationObserver(() => {
+        if (game.querySelector('canvas, iframe, video')) {
+          loading.hidden = true;
+          observer.disconnect();
+        }
+      });
+      observer.observe(game, { childList: true, subtree: true });
+
+      const loader = document.createElement('script');
+      loader.src = window.EJS_pathtodata + 'loader.js';
+      loader.async = true;
+      loader.onerror = () => {
+        observer.disconnect();
+        showError('No se pudo cargar el emulador', 'Revisá tu conexión a internet o intentá recargar el juego. EmulatorJS se descarga desde su CDN.');
+      };
+      document.head.appendChild(loader);
+
+      // Si el motor aún no dibujó, el aviso de carga permanece visible.
+      window.setTimeout(() => {
+        if (!game.querySelector('canvas, iframe, video') && !loading.classList.contains('error')) {
+          loadingMessage.textContent = 'El emulador sigue cargando. Si no avanza, comprobá la conexión y volvé a intentarlo.';
+        }
+      }, 15000);
+    })();
+  </script>
+</body>
+</html>

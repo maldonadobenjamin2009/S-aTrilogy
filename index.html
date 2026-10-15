@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="es-AR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#080d1b">
+  <meta name="description" content="Portal web de Sonic Advance Trilogy. Elegí una ROM local y jugá en Chrome.">
+  <title>Sonic Advance Trilogy — Web Edition</title>
+  <link rel="stylesheet" href="web.css">
+</head>
+<body>
+  <div class="page-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="Sonic Advance Trilogy, inicio">
+        <span class="brand-mark" aria-hidden="true">SAT</span>
+        <span class="brand-name">SONIC ADVANCE <b>TRILOGY</b></span>
+      </a>
+      <div class="topbar-note"><span class="live-dot"></span> WEB EDITION <span class="topbar-divider">/</span> CHROME</div>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-line"></span> PORTAL DE JUEGO · GAME BOY ADVANCE</p>
+          <h1 id="hero-title">Tres aventuras.<br><span>Un solo lugar.</span></h1>
+          <p class="hero-description">Elegí uno de los juegos, cargá una ROM desde tu computadora y arrancá en el navegador. Sin instalar una aplicación de escritorio.</p>
+          <div class="hero-tags" aria-label="Características">
+            <span><span class="tag-icon">◆</span> Emulación web</span>
+            <span><span class="tag-icon">◆</span> Teclado y mando</span>
+            <span><span class="tag-icon">◆</span> Chrome</span>
+          </div>
+        </div>
+        <div class="hero-art" aria-hidden="true">
+          <div class="art-grid"></div>
+          <div class="orbit orbit-one"></div>
+          <div class="orbit orbit-two"></div>
+          <div class="speed-streak streak-one"></div>
+          <div class="speed-streak streak-two"></div>
+          <div class="hero-emblem"><span>ADVANCE</span><strong>TRILOGY</strong><small>WEB PLAYER</small></div>
+          <span class="art-coordinate coord-a">19° 98' / GBA</span>
+          <span class="art-coordinate coord-b">PLAYER 01</span>
+        </div>
+      </section>
+
+      <section class="library-section" aria-labelledby="library-title">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">TU BIBLIOTECA</p>
+            <h2 id="library-title">Elegí tu aventura</h2>
+          </div>
+          <p class="section-side-note">01 — 03 <span class="side-line"></span> GBA</p>
+        </div>
+
+        <div class="game-grid">
+          <article class="game-card card-blue" data-card="sonic-advance">
+            <div class="game-card-top"><span class="game-number">01</span><span class="game-platform">GAME BOY ADVANCE</span></div>
+            <div class="game-art art-blue" aria-hidden="true"><span class="art-ring"></span><span class="art-speed">S</span><span class="art-caption">THE BEGINNING</span></div>
+            <div class="game-card-copy">
+              <p class="game-kicker">LA AVENTURA ORIGINAL</p>
+              <h3>Sonic Advance</h3>
+              <p class="game-description">La primera aventura portátil de la trilogía.</p>
+              <button class="play-button" type="button" data-pick="sonic-advance"><span>Elegir ROM y jugar</span><span class="button-arrow" aria-hidden="true">↗</span></button>
+              <input class="rom-input" type="file" accept=".gba,.agb,.bin,application/octet-stream" data-rom-input="sonic-advance" aria-label="Seleccionar archivo ROM de Sonic Advance">
+              <p class="selected-file" data-file-label="sonic-advance">Necesitás seleccionar tu archivo .gba</p>
+            </div>
+          </article>
+
+          <article class="game-card card-orange" data-card="sonic-advance-2">
+            <div class="game-card-top"><span class="game-number">02</span><span class="game-platform">GAME BOY ADVANCE</span></div>
+            <div class="game-art art-orange" aria-hidden="true"><span class="art-ring"></span><span class="art-speed">S2</span><span class="art-caption">KEEP MOVING</span></div>
+            <div class="game-card-copy">
+              <p class="game-kicker">MÁS VELOCIDAD</p>
+              <h3>Sonic Advance 2</h3>
+              <p class="game-description">Carreras, saltos y nuevos desafíos.</p>
+              <button class="play-button" type="button" data-pick="sonic-advance-2"><span>Elegir ROM y jugar</span><span class="button-arrow" aria-hidden="true">↗</span></button>
+              <input class="rom-input" type="file" accept=".gba,.agb,.bin,application/octet-stream" data-rom-input="sonic-advance-2" aria-label="Seleccionar archivo ROM de Sonic Advance 2">
+              <p class="selected-file" data-file-label="sonic-advance-2">Necesitás seleccionar tu archivo .gba</p>
+            </div>
+          </article>
+
+          <article class="game-card card-green" data-card="sonic-advance-3">
+            <div class="game-card-top"><span class="game-number">03</span><span class="game-platform">GAME BOY ADVANCE</span></div>
+            <div class="game-art art-green" aria-hidden="true"><span class="art-ring"></span><span class="art-speed">S3</span><span class="art-caption">TEAM UP</span></div>
+            <div class="game-card-copy">
+              <p class="game-kicker">UNA NUEVA EQUIPO</p>
+              <h3>Sonic Advance 3</h3>
+              <p class="game-description">Combiná habilidades para avanzar.</p>
+              <button class="play-button" type="button" data-pick="sonic-advance-3"><span>Elegir ROM y jugar</span><span class="button-arrow" aria-hidden="true">↗</span></button>
+              <input class="rom-input" type="file" accept=".gba,.agb,.bin,application/octet-stream" data-rom-input="sonic-advance-3" aria-label="Seleccionar archivo ROM de Sonic Advance 3">
+              <p class="selected-file" data-file-label="sonic-advance-3">Necesitás seleccionar tu archivo .gba</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section class="info-strip" aria-label="Información de juego">
+        <div class="info-item"><span class="info-symbol">⌨</span><div><h3>Teclado y mando</h3><p>Configurá las teclas o un control USB/Bluetooth desde el menú del emulador.</p></div></div>
+        <div class="info-item"><span class="info-symbol">▣</span><div><h3>Partidas guardadas</h3><p>Los guardados se almacenan en el navegador. Usá el mismo perfil de Chrome para conservarlos.</p></div></div>
+        <div class="info-item"><span class="info-symbol">⛶</span><div><h3>Pantalla completa</h3><p>Usá la opción de pantalla completa en el menú integrado del emulador.</p></div></div>
+      </section>
+
+      <aside class="privacy-note">
+        <span class="privacy-icon" aria-hidden="true">ⓘ</span>
+        <p><strong>Sobre las ROM:</strong> esta web no las incluye. Seleccioná un archivo que ya tengas en tu equipo. El lanzador no tiene una función para subirlo al repositorio; el motor del emulador se carga desde el CDN de EmulatorJS, por lo que necesitás conexión a internet.</p>
+      </aside>
+    </main>
+
+    <footer class="footer">
+      <span>SONIC ADVANCE TRILOGY <span class="footer-muted">/ WEB EDITION</span></span>
+      <span class="footer-disclaimer">Proyecto comunitario no afiliado a SEGA. Sonic y Sonic Advance son marcas de sus respectivos propietarios.</span>
+    </footer>
+  </div>
+
+  <section class="player-modal" id="player-modal" role="dialog" aria-modal="true" aria-labelledby="player-title" hidden>
+    <div class="player-window">
+      <header class="player-toolbar">
+        <div class="player-heading"><span class="player-indicator"></span><div><p class="player-eyebrow">SONIC ADVANCE TRILOGY</p><h2 id="player-title">Jugador web</h2></div></div>
+        <button class="back-button" type="button" id="close-player"><span aria-hidden="true">←</span> Volver al hub</button>
+      </header>
+      <div class="player-frame-wrap">
+        <iframe id="player-frame" title="Emulador de Game Boy Advance" allow="autoplay; fullscreen; gamepad" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+      </div>
+      <div class="player-footer"><span>TIP: HACÉ CLIC DENTRO DEL JUEGO PARA ACTIVAR LOS CONTROLES</span><span>ESC / MENÚ DEL EMULADOR</span></div>
+    </div>
+  </section>
+
+  <script src="web.js" defer></script>
+</body>
+</html>
