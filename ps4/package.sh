@@ -7,6 +7,7 @@ CONTENT_ID="${4:?Content ID required}"
 TITLE_ID="${5:?Title ID required}"
 VERSION="${6:?Version required}"
 TITLE="${7:?Title required}"
+PKG_NAME="${8:-SonicAdvanceTrilogy-PS4.pkg}"
 TOOLS="$SDK/bin/linux"
 PKGTOOL="$TOOLS/PkgTool.Core"
 CREATE_FSELF="$TOOLS/create-fself"
@@ -69,5 +70,5 @@ if [ ! -f "$PKG_PATH" ]; then
 fi
 [ -n "${PKG_PATH:-}" ] && [ -f "$PKG_PATH" ] || { echo "ERROR: PkgTool.Core no generó un PKG" >&2; exit 1; }
 mkdir -p "$(dirname "$STAGE")"
-cp "$PKG_PATH" "$(dirname "$STAGE")/SonicAdvanceTrilogy-PS4.pkg"
-echo "PKG creado: $(dirname "$STAGE")/SonicAdvanceTrilogy-PS4.pkg"
+cp "$PKG_PATH" "$(dirname "$STAGE")/$PKG_NAME"
+echo "PKG creado: $(dirname "$STAGE")/$PKG_NAME"
