@@ -94,12 +94,12 @@ int main(int argc, char** argv) {
 	FILE* legacy = fopen(path, "w");
 	if (legacy) { fputs("pad_PAUSE=5\n", legacy); fclose(legacy); }
 	Config legacy_cfg; config_defaults(&legacy_cfg); config_load(&legacy_cfg, path);
-	CHECK(legacy_cfg.pad[ACT_PAUSE] == PAD_TOUCHPAD, "configuración antigua migra pausa a panel táctil");
+	CHECK(legacy_cfg.pad[0][ACT_PAUSE] == PAD_TOUCHPAD && legacy_cfg.pad[1][ACT_PAUSE] == PAD_TOUCHPAD, "configuración antigua migra pausa a panel táctil");
 	sys_remove(path);
 
 	app = app_create(work, &host);
 	CHECK(app != NULL, "app_create");
-	CHECK(app->cfg.pad[ACT_PAUSE] == PAD_TOUCHPAD, "panel táctil como pausa predeterminada");
+	CHECK(app->cfg.pad[0][ACT_PAUSE] == PAD_TOUCHPAD && app->cfg.pad[1][ACT_PAUSE] == PAD_TOUCHPAD, "panel táctil como pausa predeterminada");
 	printf("mGBA %s | roms: %d %d %d\n", emu_version(), app->rom_found[0], app->rom_found[1], app->rom_found[2]);
 	CHECK(app->rom_found[0] && !app->rom_found[1] && !app->rom_found[2], "detección de ROMs (sin distinguir mayúsculas)");
 
@@ -109,11 +109,14 @@ int main(int argc, char** argv) {
 	CHECK(app->state == ST_MAIN && app->toast[0], "jugar sin ROM muestra aviso y no inicia");
 	key(K_LEFT); step(30);
 
-	/* ---- iniciar juego */
+	/* ---- iniciar juego: selector nativo de modo */
 	key(K_RETURN); step(1);
 	CHECK(app->loading == 1, "pantalla 'Iniciando…'");
 	step(1);
-	CHECK(app->state == ST_GAME && app->emu, "el juego arranca dentro del launcher");
+	CHECK(app->modal && app->modal_kind == 1 && strstr(app->modal_title, "¿CÓMO DESEA JUGAR?") != NULL,
+	      "cada juego muestra el selector 1J/2J");
+	key(K_RETURN); /* 1J seleccionado por defecto */
+	CHECK(app->state == ST_GAME && app->emu && !app->emu2, "el modo 1J inicia el núcleo individual");
 	CHECK(strstr(last_title, "Sonic Advance") != NULL, "título de ventana");
 	stepg(40);
 	CHECK(app->have_frame, "hay fotograma");
@@ -195,11 +198,17 @@ int main(int argc, char** argv) {
 	CHECK(app->cfg.keys[ACT_B] == 'k' && app->cfg.keys[ACT_A] == oldB, "intercambio al repetir tecla");
 	app->ctrl_row = 0; key(K_RIGHT); key(K_RETURN); CHECK(app->capture_kind == 1, "esperando botón de mando");
 	ev(EV_PAD_DOWN, 7, 0); ev(EV_PAD_UP, 7, 0);
-	CHECK(app->cfg.pad[ACT_A] == 7 && app->capture_kind == -1, "A del mando = L3");
-	key(K_RETURN); key(K_ESCAPE); CHECK(app->capture_kind == -1 && app->cfg.pad[ACT_A] == 7, "Esc cancela");
-	key(K_DELETE); CHECK(app->cfg.pad[ACT_A] == -1, "Supr borra");
+	CHECK(app->cfg.pad[0][ACT_A] == 7 && app->capture_kind == -1, "A del mando J1 = L3");
+	key(K_RETURN); key(K_ESCAPE); CHECK(app->capture_kind == -1 && app->cfg.pad[0][ACT_A] == 7, "Esc cancela");
+	key(K_DELETE); CHECK(app->cfg.pad[0][ACT_A] == -1, "Supr borra el mapa del mando J1");
+	app->ctrl_row = 0; key(K_RIGHT); key(K_RIGHT); key(K_RETURN);
+	CHECK(app->capture_kind == 2, "esperando botón del mando J2");
+	AppEvent j2down = {EV_PAD_DOWN, 8, 0, 1}, j2up = {EV_PAD_UP, 8, 0, 1};
+	app_event(app, &j2down); app_event(app, &j2up);
+	CHECK(app->cfg.pad[1][ACT_A] == 8 && app->cfg.pad[0][ACT_A] == -1,
+	      "asignar J2 no modifica el mapa de J1");
 	app->ctrl_row = ACT_COUNT; key(K_RETURN);
-	CHECK(app->cfg.keys[ACT_A] == 'x' && app->cfg.pad[ACT_A] == PAD_CIRCLE, "restablecer");
+	CHECK(app->cfg.keys[ACT_A] == 'x' && app->cfg.pad[0][ACT_A] == PAD_CIRCLE && app->cfg.pad[1][ACT_A] == PAD_CIRCLE, "restablecer ambos mandos por separado");
 	app->ctrl_row = ACT_COUNT + 1; key(K_RETURN); CHECK(app->state == ST_PAUSE, "volver a la pausa");
 	/* configuración persistida */
 	Config c2; config_defaults(&c2); config_load(&c2, app->cfg_path);
@@ -224,20 +233,20 @@ int main(int argc, char** argv) {
 	CHECK(app->state == ST_MAIN && !app->emu, "salir al launcher");
 	step(10);
 
-	/* ---- aviso opcional y flujo real de pantalla dividida */
+	/* ---- selector 1J/2J y flujo real de pantalla dividida */
 	ev(EV_PAD_COUNT, 0, 2);
-	key(K_RETURN); step(1); CHECK(app->loading, "inicio con dos mandos muestra primero la carga");
+	key(K_RETURN); step(1); CHECK(app->loading, "inicio con mandos muestra primero la carga");
 	step(1);
-	CHECK(app->modal && app->modal_kind == 1 && strstr(app->modal_text, "¿quieres jugar a pantalla dividida?") != NULL,
-	      "aviso de pantalla dividida al detectar segundo mando");
-	key(K_RIGHT); key(K_RETURN);
-	CHECK(app->state == ST_GAME && app->emu && !app->emu2, "No inicia en un jugador");
+	CHECK(app->modal && app->modal_kind == 1 && strstr(app->modal_title, "¿CÓMO DESEA JUGAR?") != NULL,
+	      "selector de modo aparece también con dos mandos");
+	key(K_RETURN); /* elige 1J */
+	CHECK(app->state == ST_GAME && app->emu && !app->emu2, "1J inicia un solo núcleo aunque haya dos mandos");
 	key(K_ESCAPE); step(1); app->pause_sel = 7; key(K_RETURN);
 	CHECK(app->state == ST_MAIN && !app->emu, "salida del modo individual de prueba");
 	key(K_RETURN); step(1); step(1);
-	CHECK(app->modal && app->modal_kind == 1, "aviso vuelve a aparecer para la siguiente partida");
-	key(K_RETURN);
-	CHECK(app->state == ST_GAME && app->emu && app->emu2, "Sí inicia dos núcleos mGBA enlazados");
+	CHECK(app->modal && app->modal_kind == 1, "selector vuelve a aparecer para la siguiente partida");
+	key(K_RIGHT); key(K_RETURN); /* elige 2J */
+	CHECK(app->state == ST_GAME && app->emu && app->emu2, "2J inicia dos núcleos mGBA enlazados aunque no dependan de mandos");
 	int pair_audio_before = audio_total;
 	stepg(8);
 	AppFrame split_frame; app_render(app, &split_frame);

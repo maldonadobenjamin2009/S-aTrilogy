@@ -11,7 +11,7 @@ typedef struct {
 	int integer_scale;
 	int show_fps;
 	int keys[ACT_COUNT]; /* código de tecla o -1 */
-	int pad[ACT_COUNT];  /* id de botón de mando o -1 */
+	int pad[2][ACT_COUNT]; /* asignaciones independientes de mando para J1 y J2 */
 } Config;
 
 extern const char* const action_label[ACT_COUNT];

@@ -38,8 +38,8 @@ struct App {
 	int zone, sel, btn;              /* principal: zona 0 tarjetas / 1 botones */
 	int settings_page;               /* 0 ajustes, 1 controles */
 	int set_sel, controls_from_pause, ctrl_row, ctrl_col;
-	int capture_kind, capture_act;   /* capture_kind: -1 ninguno, 0 teclado, 1 mando */
-	int modal_kind, modal_choice, prompt_game; /* 1 = confirmación de pantalla dividida */
+	int capture_kind, capture_act;   /* -1 ninguno, 0 teclado, 1 mando J1, 2 mando J2 */
+	int modal_kind, modal_choice, prompt_game; /* 1 = selector de modo 1J/2J */
 	int pause_sel; float pause_anim[PAUSE_COUNT];
 	int slot_mode, slot_sel, last_slot; /* slot_mode: 0 guardar, 1 cargar */
 	Canvas* slot_thumbs[SLOT_COUNT + 1];

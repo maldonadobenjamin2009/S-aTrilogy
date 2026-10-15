@@ -30,7 +30,12 @@ static Rect settings_panel(void) { return rect_make(490, 40, 940, 1000); }
 Rect ui_settings_row(int k) { Rect p = settings_panel(); return rect_make(p.x + 40, p.y + 120 + k * 92, p.w - 80, 80); }
 static Rect controls_panel(void) { return rect_make(160, 40, 1600, 1000); }
 Rect ui_ctrl_row_rect(int k) { Rect p = controls_panel(); return rect_make(p.x + 40, p.y + 150 + k * 47, p.w - 80, 43); }
-Rect ui_ctrl_cell_rect(int k, int col) { Rect r = ui_ctrl_row_rect(k); return rect_make(r.x + (col == 0 ? 540 : 1030), r.y, 470, r.h); }
+Rect ui_ctrl_cell_rect(int k, int col) {
+	Rect r = ui_ctrl_row_rect(k);
+	static const int offsets[3] = {350, 740, 1130};
+	if (col < 0 || col > 2) col = 0;
+	return rect_make(r.x + offsets[col], r.y, 350, r.h);
+}
 Rect ui_pause_rect(int i) { return rect_make(100, 200 + i * 98, 660, 82); }
 Rect ui_slot_rect(int n) { return rect_make(100 + (n % 4) * 440, 200 + (n / 4) * 395, 400, 365); }
 Rect ui_modal_ok(void) { return rect_make(UI_W / 2 - 140, 640, 280, 70); }
@@ -401,33 +406,37 @@ static void draw_controls(App* a, Canvas* c) {
 	T(c, "CONTROLES", p.x + 50, p.y + 28, 50, C_WHITE, TX_BOLD);
 	Rect r0 = ui_ctrl_row_rect(0);
 	T(c, "ACCIÓN", r0.x + 20, p.y + 112, 20, C_MUTED, TX_BOLD);
-	T(c, "TECLADO", r0.x + 540 + 20, p.y + 112, 20, C_MUTED, TX_BOLD);
-	T(c, "MANDO (PS4)", r0.x + 1030 + 20, p.y + 112, 20, C_MUTED, TX_BOLD);
+	T(c, "TECLADO", ui_ctrl_cell_rect(0, 0).x + 18, p.y + 112, 20, C_MUTED, TX_BOLD);
+	T(c, a->pad_count >= 1 ? "MANDO J1 · CONECTADO" : "MANDO J1 · SIN DETECTAR",
+	  ui_ctrl_cell_rect(0, 1).x + 10, p.y + 112, 17, a->pad_count >= 1 ? C_WHITE : C_MUTED, TX_BOLD);
+	T(c, a->pad_count >= 2 ? "MANDO J2 · CONECTADO" : "MANDO J2 · SIN DETECTAR",
+	  ui_ctrl_cell_rect(0, 2).x + 10, p.y + 112, 17, a->pad_count >= 2 ? C_WHITE : C_MUTED, TX_BOLD);
 	float pulse = 0.5f + 0.5f * sinf((float) a->now * 6.0f);
 	for (int k = 0; k < ACT_COUNT + 2; k++) {
 		Rect r = ui_ctrl_row_rect(k);
 		int focused = k == a->ctrl_row;
 		if (k < ACT_COUNT) {
 			panel(c, r, focused ? with_alpha(acc, 60) : ARGB(14, 255, 255, 255), 10, 0, 0);
-			T(c, action_label[k], r.x + 20, r.y + r.h / 2, 26, focused ? C_WHITE : C_SOFT, TX_VMID | (focused ? TX_BOLD : 0));
-			for (int col = 0; col < 2; col++) {
+			T(c, action_label[k], r.x + 20, r.y + r.h / 2, 23, focused ? C_WHITE : C_SOFT, TX_VMID | (focused ? TX_BOLD : 0));
+			for (int col = 0; col < 3; col++) {
 				Rect cell = ui_ctrl_cell_rect(k, col);
 				int sel = focused && a->ctrl_col == col;
-				int waiting = a->capture_kind >= 0 && sel;
-				int code = col == 0 ? a->cfg.keys[k] : a->cfg.pad[k];
+				int waiting = a->capture_kind == col && a->capture_kind >= 0 && sel;
+				int code = col == 0 ? a->cfg.keys[k] : a->cfg.pad[col - 1][k];
 				if (waiting) {
 					panel(c, cell, ARGB((int) (70 + 70 * pulse), 255, 205, 60), 10, C_GOLD, 3);
-					T(c, col == 0 ? "Pulsa una tecla…" : "Pulsa un botón…", cell.x + cell.w / 2, cell.y + cell.h / 2, 24, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+					T(c, col == 0 ? "Pulsa una tecla…" : "Pulsa un botón…",
+					  cell.x + cell.w / 2, cell.y + cell.h / 2, 20, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
 				} else {
 					panel(c, cell, ARGB(90, 0, 0, 0), 10, sel ? acc : ARGB(40, 255, 255, 255), sel ? 3 : 1);
 					char buf[64];
 					if (col == 0) key_label(a, code, buf, sizeof(buf)); else pad_label(code, buf, sizeof(buf));
-					T(c, buf, cell.x + cell.w / 2, cell.y + cell.h / 2, 24, code >= 0 ? C_WHITE : C_MUTED, TX_CENTER | TX_VMID | (sel ? TX_BOLD : 0));
+					T(c, buf, cell.x + cell.w / 2, cell.y + cell.h / 2, 21, code >= 0 ? C_WHITE : C_MUTED, TX_CENTER | TX_VMID | (sel ? TX_BOLD : 0));
 				}
 			}
 		} else {
 			panel(c, r, focused ? with_alpha(acc, 110) : ARGB(18, 255, 255, 255), 10, focused ? acc : 0, 3);
-			T(c, k == ACT_COUNT ? "Restablecer controles por defecto" : "Volver", r.x + r.w / 2, r.y + r.h / 2, 26, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+			T(c, k == ACT_COUNT ? "Restablecer todos los controles por defecto" : "Volver", r.x + r.w / 2, r.y + r.h / 2, 25, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
 		}
 	}
 	if (a->capture_kind >= 0) {
@@ -453,8 +462,8 @@ static void draw_modal(App* a, Canvas* c) {
 		      a->modal_choice == 0 ? C_WHITE : ARGB(100, 255, 255, 255), a->modal_choice == 0 ? 4 : 2);
 		panel(c, no, a->modal_choice == 1 ? cur_accent(a) : ARGB(255, 28, 32, 54), 16,
 		      a->modal_choice == 1 ? C_WHITE : ARGB(100, 255, 255, 255), a->modal_choice == 1 ? 4 : 2);
-		T(c, "SÍ", yes.x + yes.w / 2, yes.y + yes.h / 2, 28, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
-		T(c, "NO", no.x + no.w / 2, no.y + no.h / 2, 28, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+		T(c, "1J", yes.x + yes.w / 2, yes.y + yes.h / 2, 34, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+		T(c, "2J", no.x + no.w / 2, no.y + no.h / 2, 34, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
 	} else {
 		Rect ok = ui_modal_ok();
 		panel(c, ok, cur_accent(a), 16, C_WHITE, 3);

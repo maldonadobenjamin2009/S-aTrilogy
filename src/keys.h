@@ -16,6 +16,9 @@
 #define K_F5 1073741886
 #define K_F8 1073741889
 #define K_F11 1073741892
+#define K_RCTRL 1073742052
+#define K_RSHIFT 1073742053
+#define K_RALT 1073742054
 
 /* Ids de botones de mando = SDL_GameControllerButton (PS4: 0 Cruz, 1 Círculo, 2 Cuadrado,
  * 3 Triángulo, 4 Share, 5 PS, 6 Options, 7 L3, 8 R3, 9 L1, 10 R1, 11-14 cruceta, 20 panel táctil)

@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define CONFIG_VERSION 2
+#define CONFIG_VERSION 3
 
 const char* const action_label[ACT_COUNT] = {
 	"Botón A", "Botón B", "Botón L", "Botón R", "Start", "Select", "Arriba", "Abajo",
@@ -21,7 +21,11 @@ void config_defaults(Config* c) {
 	                          K_ESCAPE, K_TAB, K_F5, K_F8};
 	const int p[ACT_COUNT] = {PAD_CIRCLE, PAD_CROSS, PAD_L1, PAD_R1, PAD_OPTIONS, PAD_SHARE, PAD_UP, PAD_DOWN,
 	                          PAD_LEFT, PAD_RIGHT, PAD_TOUCHPAD, PAD_R2, -1, -1};
-	for (int i = 0; i < ACT_COUNT; i++) { c->keys[i] = k[i]; c->pad[i] = p[i]; }
+	for (int i = 0; i < ACT_COUNT; i++) {
+		c->keys[i] = k[i];
+		c->pad[0][i] = p[i];
+		c->pad[1][i] = p[i];
+	}
 }
 
 int config_load(Config* c, const char* path) {
@@ -41,9 +45,25 @@ int config_load(Config* c, const char* path) {
 		else if (!strcmp(key, "smooth")) c->smooth = v != 0;
 		else if (!strcmp(key, "integer_scale")) c->integer_scale = v != 0;
 		else if (!strcmp(key, "show_fps")) c->show_fps = v != 0;
-		else if (!strncmp(key, "key_", 4) || !strncmp(key, "pad_", 4)) {
+		else if (!strncmp(key, "key_", 4)) {
 			for (int i = 0; i < ACT_COUNT; i++)
-				if (!strcmp(key + 4, action_id[i])) { if (key[0] == 'k') c->keys[i] = (int) v; else c->pad[i] = (int) v; }
+				if (!strcmp(key + 4, action_id[i])) c->keys[i] = (int) v;
+		}
+		else if (!strncmp(key, "pad1_", 5)) {
+			for (int i = 0; i < ACT_COUNT; i++)
+				if (!strcmp(key + 5, action_id[i])) c->pad[0][i] = (int) v;
+		}
+		else if (!strncmp(key, "pad2_", 5)) {
+			for (int i = 0; i < ACT_COUNT; i++)
+				if (!strcmp(key + 5, action_id[i])) c->pad[1][i] = (int) v;
+		}
+		else if (!strncmp(key, "pad_", 4)) {
+			/* Migración de configs v1/v2: el mapa antiguo era compartido; copiar
+			 * el valor a ambos jugadores antes de que puedan personalizarse. */
+			for (int i = 0; i < ACT_COUNT; i++) if (!strcmp(key + 4, action_id[i])) {
+				c->pad[0][i] = (int) v;
+				c->pad[1][i] = (int) v;
+			}
 		}
 	}
 	fclose(f);
@@ -51,7 +71,8 @@ int config_load(Config* c, const char* path) {
 	 * En mandos DualShock 4/compatibles, el usuario ahora espera el clic del touchpad (20).
 	 * Se hace solo al migrar una configuración antigua; las futuras asignaciones se respetan. */
 	if (version < CONFIG_VERSION) {
-		if (c->pad[ACT_PAUSE] == PAD_PS) c->pad[ACT_PAUSE] = PAD_TOUCHPAD;
+		for (int player = 0; player < 2; player++)
+			if (c->pad[player][ACT_PAUSE] == PAD_PS) c->pad[player][ACT_PAUSE] = PAD_TOUCHPAD;
 		config_save(c, path); /* persiste la migración y el marcador de versión */
 	}
 	return 1;
@@ -62,6 +83,7 @@ int config_save(const Config* c, const char* path) {
 	if (!f) return 0;
 	fprintf(f, "config_version=%d\nfullscreen=%d\nvolume=%d\nsmooth=%d\ninteger_scale=%d\nshow_fps=%d\n", CONFIG_VERSION, c->fullscreen, c->volume, c->smooth, c->integer_scale, c->show_fps);
 	for (int i = 0; i < ACT_COUNT; i++) fprintf(f, "key_%s=%d\n", action_id[i], c->keys[i]);
-	for (int i = 0; i < ACT_COUNT; i++) fprintf(f, "pad_%s=%d\n", action_id[i], c->pad[i]);
+	for (int i = 0; i < ACT_COUNT; i++) fprintf(f, "pad1_%s=%d\n", action_id[i], c->pad[0][i]);
+	for (int i = 0; i < ACT_COUNT; i++) fprintf(f, "pad2_%s=%d\n", action_id[i], c->pad[1][i]);
 	return fclose(f) == 0;
 }

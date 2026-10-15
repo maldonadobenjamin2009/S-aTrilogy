@@ -313,30 +313,29 @@ static void start_game_now(App* a, int i, int multiplayer) {
 static void start_game(App* a, int i) {
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
 #if !defined(__EMSCRIPTEN__)
-	if (a->pad_count >= 2) {
-		a->modal = 1;
-		a->modal_kind = 1;
-		a->modal_choice = 0;
-		a->prompt_game = i;
-		snprintf(a->modal_title, sizeof(a->modal_title), "Multijugador detectado");
-		snprintf(a->modal_text, sizeof(a->modal_text), "Se ha detectado otro mando más conectado, ¿quieres jugar a pantalla dividida?");
-		return;
-	}
-#endif
+	a->modal = 1;
+	a->modal_kind = 1;
+	a->modal_choice = 0;
+	a->prompt_game = i;
+	snprintf(a->modal_title, sizeof(a->modal_title), "¿CÓMO DESEA JUGAR?");
+	snprintf(a->modal_text, sizeof(a->modal_text),
+	         a->pad_count >= 2
+	           ? "Hay dos mandos detectados. Puedes usarlos o elegir jugar con teclado."
+	           : "El modo 2J también funciona sin mandos: J1 usa WASD y J2 las flechas.");
+	return;
+#else
 	start_game_now(a, i, 0);
+#endif
 }
 
-static void resolve_multiplayer_prompt(App* a, int yes) {
+static void resolve_game_mode(App* a, int two_players) {
 	int game = a->prompt_game;
 	a->modal = 0;
 	a->modal_kind = 0;
 	if (game < 0 || game >= NUM_GAMES) return;
-	if (yes && a->pad_count >= 2) {
-		start_game_now(a, game, 1);
-	} else {
-		if (yes) app_toast(a, "El segundo mando se desconectó; se iniciará un jugador");
-		start_game_now(a, game, 0);
-	}
+	/* El modo 2J enlaza dos núcleos mGBA incluso sin mandos; las teclas de ambos
+	 * jugadores se transforman en máscaras de entrada independientes. */
+	start_game_now(a, game, two_players != 0);
 }
 
 static void pause_game(App* a) {
@@ -397,12 +396,33 @@ static int pressed_id(const App* a, int id) {
 	if (set_has(a->pad_down, a->npad, id) || set_has(a->stick_down, a->nstick, id)) return 1;
 	return (id == PAD_L2 && a->trig[0]) || (id == PAD_R2 && a->trig[1]);
 }
-static uint32_t keymask(const App* a) {
+/* En 2J sin mandos, mapa clásico de teclado compartido:
+ * J1: WASD, X/Z, Q/E, 2=Start, 1=Select.
+ * J2: flechas, Ctrl derecho=A, Alt derecho/AltGr=B, Enter=Start,
+ * Shift derecho=Select. Cada tabla está separada para permitir que teclado y
+ * mando funcionen simultáneamente. */
+static const int dual_keyboard_keys[2][ACT_COUNT] = {
+	{'x', 'z', 'q', 'e', '2', '1', 'w', 's', 'a', 'd', K_ESCAPE, K_TAB, K_F5, K_F8},
+	{K_RCTRL, K_RALT, -1, -1, K_RETURN, K_RSHIFT, K_UP, K_DOWN, K_LEFT, K_RIGHT, -1, -1, -1, -1}
+};
+static uint32_t dual_keyboard_mask(const App* a, int player) {
 	uint32_t m = 0;
+	if (player < 0 || player > 1) return 0;
+	for (int i = 0; i < ACT_COUNT; i++) {
+		int k = dual_keyboard_keys[player][i];
+		if (GBA_BIT[i] >= 0 && k >= 0 && set_has(a->keys_down, a->nkeys, k)) m |= 1u << GBA_BIT[i];
+	}
+	return m;
+}
+static uint32_t keymask(const App* a) {
+	uint32_t m = a->emu2 ? dual_keyboard_mask(a, 0) : 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
-		int k = a->cfg.keys[i];
-		if ((k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[i]) || a->touch_down[i]) m |= 1u << GBA_BIT[i];
+		if (!a->emu2) {
+			int k = a->cfg.keys[i];
+			if (k >= 0 && set_has(a->keys_down, a->nkeys, k)) m |= 1u << GBA_BIT[i];
+		}
+		if (pressed_id(a, a->cfg.pad[0][i]) || a->touch_down[i]) m |= 1u << GBA_BIT[i];
 	}
 	return m;
 }
@@ -412,16 +432,17 @@ static int pressed_id2(const App* a, int id) {
 	return (id == PAD_L2 && a->p2_trig[0]) || (id == PAD_R2 && a->p2_trig[1]);
 }
 static uint32_t keymask2(const App* a) {
-	uint32_t m = 0;
+	uint32_t m = a->emu2 ? dual_keyboard_mask(a, 1) : 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
-		if (pressed_id2(a, a->cfg.pad[i])) m |= 1u << GBA_BIT[i];
+		if (pressed_id2(a, a->cfg.pad[1][i])) m |= 1u << GBA_BIT[i];
 	}
 	return m;
 }
 static int turbo_active(const App* a) {
 	int k = a->cfg.keys[ACT_TURBO];
-	return (k >= 0 && set_has(a->keys_down, a->nkeys, k)) || pressed_id(a, a->cfg.pad[ACT_TURBO]) || a->touch_down[ACT_TURBO];
+	return (k >= 0 && set_has(a->keys_down, a->nkeys, k)) ||
+	       pressed_id(a, a->cfg.pad[0][ACT_TURBO]) || a->touch_down[ACT_TURBO];
 }
 
 /* ------------------------------------------------------------------- ajustes */
@@ -436,10 +457,11 @@ static void adjust_volume(App* a, int d) {
 	app_save_config(a);
 }
 static void assign(App* a, int kind, int act, int code) {
-	int* tbl = kind == 0 ? a->cfg.keys : a->cfg.pad;
+	if (act < 0 || act >= ACT_COUNT || kind < 0 || kind > 2) return;
+	int* tbl = kind == 0 ? a->cfg.keys : a->cfg.pad[kind - 1];
 	if (code >= 0)
 		for (int o = 0; o < ACT_COUNT; o++)
-			if (o != act && tbl[o] == code) tbl[o] = tbl[act];   /* intercambio para no duplicar */
+			if (o != act && tbl[o] == code) tbl[o] = tbl[act];   /* intercambio solo dentro de ese dispositivo */
 	tbl[act] = code;
 	app_save_config(a);
 }
@@ -485,7 +507,13 @@ static void controls_action(App* a, int act) {
 	int n = ACT_COUNT + 2;
 	if (act == A_UP) a->ctrl_row = (a->ctrl_row + n - 1) % n;
 	else if (act == A_DOWN) a->ctrl_row = (a->ctrl_row + 1) % n;
-	else if (act == A_LEFT || act == A_RIGHT) { if (a->ctrl_row < ACT_COUNT) a->ctrl_col = act == A_LEFT ? 0 : 1; }
+	else if (act == A_LEFT || act == A_RIGHT) {
+		if (a->ctrl_row < ACT_COUNT) {
+			a->ctrl_col += act == A_LEFT ? -1 : 1;
+			if (a->ctrl_col < 0) a->ctrl_col = 2;
+			if (a->ctrl_col > 2) a->ctrl_col = 0;
+		}
+	}
 	else if (act == A_BACK || act == A_MENU) leave_controls(a);
 	else if (act == A_EXTRA) { if (a->ctrl_row < ACT_COUNT) assign(a, a->ctrl_col, a->ctrl_row, -1); }
 	else if (act == A_ACCEPT) {
@@ -582,8 +610,8 @@ static void dispatch(App* a, int act) {
 		if (a->modal_kind == 1) {
 			if (act == A_LEFT || act == A_UP) a->modal_choice = 0;
 			else if (act == A_RIGHT || act == A_DOWN) a->modal_choice = 1;
-			else if (act == A_ACCEPT) resolve_multiplayer_prompt(a, a->modal_choice == 0);
-			else if (act == A_BACK) resolve_multiplayer_prompt(a, 0);
+			else if (act == A_ACCEPT) resolve_game_mode(a, a->modal_choice == 1);
+			else if (act == A_BACK) resolve_game_mode(a, 0);
 		} else if (act == A_ACCEPT || act == A_BACK) a->modal = 0;
 		return;
 	}
@@ -647,10 +675,19 @@ static void on_key_down(App* a, int k, int alt) {
 	}
 	if (k == K_F11 || (k == K_RETURN && alt)) { toggle_fullscreen(a); return; }
 	if (a->state == ST_GAME) {
-		if (k == a->cfg.keys[ACT_PAUSE]) pause_game(a);
-		else if (k == a->cfg.keys[ACT_QSAVE]) quick_save(a);
-		else if (k == a->cfg.keys[ACT_QLOAD]) quick_load(a);
-		else set_add(a->keys_down, &a->nkeys, k);
+		if (a->emu2) {
+			/* En 2J la tecla de pausa y los guardados rápidos siguen siendo globales;
+			 * las teclas de acción se leen luego con mapas separados por jugador. */
+			if (k == K_ESCAPE) pause_game(a);
+			else if (k == K_F5) quick_save(a);
+			else if (k == K_F8) quick_load(a);
+			else set_add(a->keys_down, &a->nkeys, k);
+		} else {
+			if (k == a->cfg.keys[ACT_PAUSE]) pause_game(a);
+			else if (k == a->cfg.keys[ACT_QSAVE]) quick_save(a);
+			else if (k == a->cfg.keys[ACT_QLOAD]) quick_load(a);
+			else set_add(a->keys_down, &a->nkeys, k);
+		}
 		return;
 	}
 	if (a->state == ST_PAUSE && k == a->cfg.keys[ACT_PAUSE] && k != K_ESCAPE) { resume_game(a); return; }
@@ -660,25 +697,28 @@ static void on_key_down(App* a, int k, int alt) {
 }
 
 static void on_pad_button(App* a, int id, int down, int player) {
+	/* Capture para cada columna física (1 = mando J1, 2 = mando J2). */
+	if (a->capture_kind >= 0) {
+		if (a->capture_kind == 0) return; /* se está esperando una tecla */
+		if (a->capture_kind == player + 1) {
+			set_pad_mode(a, 1);
+			if (down) { assign(a, a->capture_kind, a->capture_act, id); a->capture_kind = -1; }
+		}
+		return;
+	}
 	if (player == 1) {
-		/* J2 solo controla su núcleo durante una sesión enlazada. No puede pausar
-		 * ni accionar menús del launcher, que siguen perteneciendo a J1. */
+		/* J2 solo controla su núcleo durante una sesión enlazada. */
 		if (a->state != ST_GAME || !a->emu2) return;
 		if (down) set_add(a->p2_pad_down, &a->p2_npad, id);
 		else set_del(a->p2_pad_down, &a->p2_npad, id);
 		return;
 	}
 	set_pad_mode(a, 1);
-	if (a->capture_kind == 1) {
-		if (down) { assign(a, 1, a->capture_act, id); a->capture_kind = -1; }
-		return;
-	}
-	if (a->capture_kind == 0) return;
 	if (a->state == ST_GAME) {
 		if (down) {
-			if (id == a->cfg.pad[ACT_PAUSE]) pause_game(a);
-			else if (id == a->cfg.pad[ACT_QSAVE]) quick_save(a);
-			else if (id == a->cfg.pad[ACT_QLOAD]) quick_load(a);
+			if (id == a->cfg.pad[0][ACT_PAUSE]) pause_game(a);
+			else if (id == a->cfg.pad[0][ACT_QSAVE]) quick_save(a);
+			else if (id == a->cfg.pad[0][ACT_QLOAD]) quick_load(a);
 			else set_add(a->pad_down, &a->npad, id);
 		} else set_del(a->pad_down, &a->npad, id);
 		return;
@@ -689,7 +729,7 @@ static void on_pad_button(App* a, int id, int down, int player) {
 		return;
 	}
 	if (!down) return;
-	if (a->state == ST_PAUSE && id == a->cfg.pad[ACT_PAUSE]) { resume_game(a); return; }
+	if (a->state == ST_PAUSE && id == a->cfg.pad[0][ACT_PAUSE]) { resume_game(a); return; }
 	switch (id) {
 	case PAD_CROSS: dispatch(a, A_ACCEPT); break;
 	case PAD_CIRCLE: dispatch(a, A_BACK); break;
@@ -735,7 +775,10 @@ static void mouse_move(App* a, int x, int y) {
 		if (a->settings_page) {
 			for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) {
 				a->ctrl_row = k;
-				if (k < ACT_COUNT) a->ctrl_col = x < ui_ctrl_row_rect(k).x + 1010 ? 0 : 1;
+				if (k < ACT_COUNT) {
+					for (int col = 0; col < 3; col++)
+						if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
+				}
 			}
 		} else for (int k = 0; k < SET_COUNT; k++) if (rect_has(ui_settings_row(k), x, y)) a->set_sel = k;
 	} else if (a->state == ST_PAUSE) {
@@ -751,8 +794,8 @@ static void mouse_click(App* a, int x, int y) {
 	if (a->state == ST_GAME) return;
 	if (a->modal) {
 		if (a->modal_kind == 1) {
-			if (rect_has(ui_modal_yes(), x, y)) resolve_multiplayer_prompt(a, 1);
-			else if (rect_has(ui_modal_no(), x, y)) resolve_multiplayer_prompt(a, 0);
+			if (rect_has(ui_modal_yes(), x, y)) resolve_game_mode(a, 0);
+			else if (rect_has(ui_modal_no(), x, y)) resolve_game_mode(a, 1);
 		} else if (rect_has(ui_modal_ok(), x, y)) a->modal = 0;
 		return;
 	}
