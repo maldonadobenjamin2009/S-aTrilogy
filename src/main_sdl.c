@@ -463,14 +463,10 @@ static void ensure_touch_texture(int w, int h, int paused) {
 static void present(App* app, const AppFrame* f) {
 	(void) app;
 	int ow, oh;
-#if defined(__ORBIS__) || defined(PS4)
-	/* SDL_CreateSoftwareRenderer trabaja directamente sobre esta superficie y
-	 * no todas las builds devuelven tamaño válido desde GetRendererOutputSize. */
-	ow = P.window_surface ? P.window_surface->w : 1280;
-	oh = P.window_surface ? P.window_surface->h : 720;
-#else
 	SDL_GetRendererOutputSize(P.ren, &ow, &oh);
-#endif
+	if (ow <= 0 || oh <= 0) SDL_GetWindowSize(P.win, &ow, &oh);
+	if (ow <= 0) ow = 1280;
+	if (oh <= 0) oh = 720;
 	SDL_SetRenderDrawColor(P.ren, 0, 0, 0, 255);
 	SDL_RenderClear(P.ren);
 	if (f->in_game && f->game) {
