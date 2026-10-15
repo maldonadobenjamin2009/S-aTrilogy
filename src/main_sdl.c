@@ -6,6 +6,10 @@
 #if defined(__ANDROID__)
 #include <SDL_system.h>
 #endif
+#if defined(__ORBIS__) || defined(PS4)
+#include <orbis/VideoOut.h>
+#include <sys/stat.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -596,11 +600,32 @@ int APP_ENTRY(int argc, char** argv) {
 #if defined(_WIN32)
 	open_debug_console();
 #endif
+#if defined(__ORBIS__) || defined(PS4)
+	/* /app0 es de solo lectura. Conserva el log y la configuración en almacenamiento escribible. */
+	(void) mkdir("/data/SonicAdvanceTrilogy", 0777);
+#endif
 	debug_log_init();
 	debug_log_info("Inicio de Sonic Advance Trilogy (modo SDL)");
 	emu_enable_debug_logging();
 	SDL_SetMainReady();
-	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) != 0) {
+#if defined(__ORBIS__) || defined(PS4)
+	/* OpenOrbis SDL todavía no garantiza un backend acelerado en todas las versiones.
+	 * Consultar la salida real y utilizar el renderer software probado por el sample SDL2. */
+	int ps4_screen_w = 1920, ps4_screen_h = 1080;
+	int video_handle = sceVideoOutOpen(ORBIS_VIDEO_USER_MAIN, ORBIS_VIDEO_OUT_BUS_MAIN, 0, 0);
+	if (video_handle >= 0) {
+		OrbisVideoOutResolutionStatus video_resolution;
+		memset(&video_resolution, 0, sizeof(video_resolution));
+		if (sceVideoOutGetResolutionStatus(video_handle, &video_resolution) >= 0 &&
+		    video_resolution.width > 0 && video_resolution.height > 0) {
+			ps4_screen_w = (int) video_resolution.width;
+			ps4_screen_h = (int) video_resolution.height;
+		}
+		(void) sceVideoOutClose(video_handle);
+	}
+	debug_log_info("PS4: resolución de salida %dx%d", ps4_screen_w, ps4_screen_h);
+#endif
+	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
 		debug_log_error("No se pudo iniciar SDL: %s", SDL_GetError());
 		debug_log_close();
 		return 1;
@@ -626,6 +651,11 @@ int APP_ENTRY(int argc, char** argv) {
 #endif
 	}
 #endif
+#if defined(__ORBIS__) || defined(PS4)
+	debug_log_info("PS4: base de recursos = %s", base);
+	debug_log_info("PS4: ROMs esperadas en %s/main/roms", base);
+	debug_log_info("PS4: assets esperados en %s/assets", base);
+#endif
 
 #if defined(__ANDROID__)
 	SDL_SetHint(SDL_HINT_TOUCH_MOUSE_EVENTS, "0");
@@ -633,23 +663,44 @@ int APP_ENTRY(int argc, char** argv) {
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_ALLOW_HIGHDPI);
 #elif defined(__ORBIS__) || defined(PS4)
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1920, 1080, SDL_WINDOW_FULLSCREEN);
+	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ps4_screen_w, ps4_screen_h, SDL_WINDOW_FULLSCREEN);
 #else
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy Launcher", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 #endif
 	if (!P.win) { debug_log_error("No se pudo crear la ventana: %s", SDL_GetError()); SDL_Quit(); debug_log_close(); return 1; }
+#if defined(__ORBIS__) || defined(PS4)
+	int ps4_window_w = 0, ps4_window_h = 0;
+	SDL_GetWindowSize(P.win, &ps4_window_w, &ps4_window_h);
+	debug_log_info("PS4: ventana creada a %dx%d; driver de vídeo SDL=%s", ps4_window_w, ps4_window_h,
+	               SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "desconocido");
+#endif
 #if defined(__ANDROID__)
 	/* Controlamos el ritmo a ~59,7 FPS nosotros mismos: dejar VSYNC activado
 	 * en pantallas de 90/120 Hz puede provocar 45/40 FPS por la cadencia de swap. */
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
 	if (!P.ren) { debug_log_warn("Renderizador acelerado no disponible: %s", SDL_GetError()); P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE); }
+#elif defined(__ORBIS__) || defined(PS4)
+	/* No pedir SDL_RENDERER_ACCELERATED en Orbis: algunas builds de OpenOrbis
+	 * crean ese renderer aunque el backend GPU no esté listo y la salida queda negra.
+	 * El sample SDL2 de OpenOrbis usa explícitamente SDL_RENDERER_SOFTWARE. */
+	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
+	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
+	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE);
 #else
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0"); /* el reloj del launcher fija los fotogramas */
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
 	if (!P.ren) { debug_log_warn("Renderizador acelerado no disponible: %s", SDL_GetError()); P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE); }
 #endif
-	if (P.ren) { SDL_RendererInfo ri; if (SDL_GetRendererInfo(P.ren, &ri) == 0) debug_log_info("Renderizador: %s", ri.name); }
+	if (P.ren) {
+		SDL_RendererInfo ri;
+		if (SDL_GetRendererInfo(P.ren, &ri) == 0) {
+			debug_log_info("Renderizador: %s (flags=0x%x, formatos=%u)", ri.name, (unsigned) ri.flags, (unsigned) ri.num_texture_formats);
+#if defined(__ORBIS__) || defined(PS4)
+			debug_log_info("PS4: usando renderer software de SDL; la ausencia de actividad GPU dedicada es esperable con este backend");
+#endif
+		}
+	}
 	if (!P.ren) { debug_log_error("No se pudo crear el renderizador: %s", SDL_GetError()); SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1; }
 	P.tex_ui = make_tex(SDL_PIXELFORMAT_ARGB8888, UI_W, UI_H, 1, SDL_BLENDMODE_BLEND);
 	P.tex_game_sharp = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 0, SDL_BLENDMODE_NONE);
@@ -660,6 +711,9 @@ int APP_ENTRY(int argc, char** argv) {
 		debug_log_error("No se pudieron crear las texturas: %s", SDL_GetError());
 		return 1;
 	}
+#if defined(__ORBIS__) || defined(PS4)
+	debug_log_info("PS4: texturas principales creadas correctamente (UI=%dx%d, GBA=%dx%d)", UI_W, UI_H, EMU_W, EMU_H);
+#endif
 
 	/* icono de la ventana (assets/icon.png) */
 	{
@@ -712,16 +766,36 @@ int APP_ENTRY(int argc, char** argv) {
 
 	App* app = app_create(base, &host);
 	if (!app) { debug_log_error("No se pudo iniciar el launcher: app_create devolvió NULL"); if (P.audio) SDL_CloseAudioDevice(P.audio); SDL_Quit(); debug_log_close(); return 1; }
+#if defined(__ORBIS__) || defined(PS4)
+	debug_log_info("PS4: app_create terminó; se inicia el bucle de renderizado");
+#endif
 	send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count());
 
+#if defined(__ORBIS__) || defined(PS4)
+	/* El SDL de Orbis no expone SDL_GetPerformanceFrequency de forma uniforme en
+	 * todas las builds. SDL_GetTicks sí es el reloj usado por el sample de OpenOrbis. */
+	Uint32 ps4_last_tick = SDL_GetTicks();
+	Uint32 ps4_next_tick = ps4_last_tick;
+	double ps4_frame_fraction_ms = 0.0;
+	Uint32 ps4_fps_start = ps4_last_tick;
+	unsigned ps4_frame_count = 0;
+#else
 	const double freq = (double) SDL_GetPerformanceFrequency();
 	double last = SDL_GetPerformanceCounter() / freq, next = last;
+#endif
 	AppFrame frame;
 	for (;;) {
 		pump_events(app);
+#if defined(__ORBIS__) || defined(PS4)
+		Uint32 tick_now = SDL_GetTicks();
+		/* La resta unsigned gestiona el wrap de SDL_GetTicks cada ~49 días. */
+		double dt = (double) (Uint32) (tick_now - ps4_last_tick) / 1000.0;
+		ps4_last_tick = tick_now;
+#else
 		double now = SDL_GetPerformanceCounter() / freq;
 		double dt = now - last;
 		last = now;
+#endif
 		if (dt > 0.1) dt = 0.1;
 		if (P.audio) {
 			Uint32 queued = SDL_GetQueuedAudioSize(P.audio);
@@ -731,6 +805,18 @@ int APP_ENTRY(int argc, char** argv) {
 		if (!app_update(app, dt)) break;
 		app_render(app, &frame);
 		present(app, &frame);
+#if defined(__ORBIS__) || defined(PS4)
+		ps4_frame_count++;
+		Uint32 fps_elapsed = (Uint32) (SDL_GetTicks() - ps4_fps_start);
+		if (fps_elapsed >= 5000) {
+			debug_log_info("PS4: FPS del launcher %.1f; estado=%s; salida=%dx%d",
+			               (double) ps4_frame_count * 1000.0 / (double) fps_elapsed,
+			               app_is_paused(app) ? "pausa" : (frame.in_game ? "juego" : "hub"),
+			               ps4_screen_w, ps4_screen_h);
+			ps4_frame_count = 0;
+			ps4_fps_start = SDL_GetTicks();
+		}
+#endif
 
 		if (P.audio) {
 			const int16_t* data;
@@ -747,6 +833,21 @@ int APP_ENTRY(int argc, char** argv) {
 			}
 		}
 
+#if defined(__ORBIS__) || defined(PS4)
+		/* Ritmo fraccional sin SDL_GetPerformanceCounter ni espera activa: evita
+		 * 100% CPU en un bucle que no presenta imagen si el contador no funciona. */
+		ps4_frame_fraction_ms += app_frame_time(app) * 1000.0;
+		Uint32 frame_ms = (Uint32) ps4_frame_fraction_ms;
+		ps4_frame_fraction_ms -= (double) frame_ms;
+		if (frame_ms == 0) frame_ms = 1;
+		ps4_next_tick += frame_ms;
+		int32_t delay_ms = (int32_t) (ps4_next_tick - SDL_GetTicks());
+		if (delay_ms > 0) SDL_Delay((Uint32) delay_ms);
+		else if (delay_ms < -250) {
+			ps4_next_tick = SDL_GetTicks();
+			ps4_frame_fraction_ms = 0.0;
+		}
+#else
 		next += app_frame_time(app);
 		double t = SDL_GetPerformanceCounter() / freq, delay = next - t;
 #if defined(__ANDROID__)
@@ -759,6 +860,7 @@ int APP_ENTRY(int argc, char** argv) {
 		if (delay > 0.002) SDL_Delay((Uint32) ((delay - 0.001) * 1000.0));
 		if (delay > -0.25) { while (SDL_GetPerformanceCounter() / freq < next) { } }
 		else next = SDL_GetPerformanceCounter() / freq;
+#endif
 #endif
 	}
 

@@ -11,7 +11,10 @@
 static FILE* s_log_file;
 
 static void make_log_path(char* out, size_t size) {
-#if defined(_WIN32)
+#if defined(__ORBIS__) || defined(PS4)
+    snprintf(out, size, "/data/SonicAdvanceTrilogy/main_errors.log");
+    return;
+#elif defined(_WIN32)
     char exe[MAX_PATH * 4];
     DWORD n = GetModuleFileNameA(NULL, exe, (DWORD) sizeof(exe));
     if (n > 0 && n < sizeof(exe)) {
