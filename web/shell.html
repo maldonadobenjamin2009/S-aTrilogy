@@ -71,6 +71,9 @@
   <script>
     var Module = {
       canvas: document.getElementById('canvas'),
+      // El launcher web necesita esperar al clic del usuario para iniciar el audio
+      // y permitir importar las ROM antes de llamar al main original.
+      noInitialRun: true,
       print: function (text) { console.log('[S-aTrilogy]', text); },
       printErr: function (text) { console.error('[S-aTrilogy]', text); },
       onRuntimeInitialized: function () {
