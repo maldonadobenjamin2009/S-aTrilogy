@@ -650,9 +650,48 @@ static void web_loop_cleanup(void) {
 	debug_log_close();
 }
 
+enum {
+	WEB_AUDIO_TARGET_MS = 50,
+	WEB_AUDIO_PREROLL_MS = 10,
+	WEB_AUDIO_MAX_CATCHUP_FRAMES = 4
+};
+
+/* Extrae y encola el audio recién generado. En web mantenemos un colchón corto
+ * porque una sola cola de ~16 ms se agota si requestAnimationFrame llega tarde. */
+static int web_queue_audio(WebLoopState* state) {
+	if (!P.audio || !state->app) return 0;
+	App* app = state->app;
+	const int16_t* data = NULL;
+	if (app_audio_reset_requested(app)) {
+		static const char silence[1 << 15] = {0};
+		SDL_ClearQueuedAudio(P.audio);
+		Uint32 pre = (Uint32) state->audio_rate * 4 / 1000 * WEB_AUDIO_PREROLL_MS;
+		if (pre > sizeof(silence)) pre = (Uint32) sizeof(silence);
+		if (pre) (void) SDL_QueueAudio(P.audio, silence, pre);
+	}
+	int n = app_take_audio(app, &data);
+	if (n > 0 && SDL_QueueAudio(P.audio, data, (Uint32) n * 4) != 0) {
+		debug_log_warn("SDL_QueueAudio web falló: %s", SDL_GetError());
+		return 0;
+	}
+	return n;
+}
+
+static void web_finish_loop(WebLoopState* state) {
+	emscripten_cancel_main_loop();
+	App* app = state->app;
+	state->app = NULL;
+	if (app) app_destroy(app);
+	web_loop_cleanup();
+}
+
 static void web_loop_frame(void* userdata) {
 	WebLoopState* state = (WebLoopState*) userdata;
 	App* app = state->app;
+	if (!app) {
+		emscripten_cancel_main_loop();
+		return;
+	}
 	pump_events(app);
 
 	double now = (double) SDL_GetPerformanceCounter() / state->freq;
@@ -671,31 +710,30 @@ static void web_loop_frame(void* userdata) {
 	}
 
 	if (!app_update(app, dt)) {
-		emscripten_cancel_main_loop();
-		web_loop_cleanup();
-		app_destroy(app);
-		state->app = NULL;
+		web_finish_loop(state);
 		return;
+	}
+
+	int produced = web_queue_audio(state);
+	if (P.audio && produced > 0) {
+		/* Si hubo un retraso puntual, adelantamos solo los fotogramas necesarios
+		 * para recuperar 50 ms de audio. En régimen estable se ejecuta un frame
+		 * por tick; no se duplica trabajo cuando la cola ya está llena. */
+		const Uint32 target_bytes = (Uint32) state->audio_rate * 4 * WEB_AUDIO_TARGET_MS / 1000;
+		for (int i = 0; i < WEB_AUDIO_MAX_CATCHUP_FRAMES; ++i) {
+			if (SDL_GetQueuedAudioSize(P.audio) >= target_bytes) break;
+			if (!app_update(app, 0.0)) {
+				web_finish_loop(state);
+				return;
+			}
+			produced = web_queue_audio(state);
+			if (produced <= 0) break; /* menú/pausa: no simular fotogramas extra */
+		}
 	}
 
 	AppFrame frame;
 	app_render(app, &frame);
 	present(app, &frame);
-
-	if (P.audio) {
-		const int16_t* data = NULL;
-		if (app_audio_reset_requested(app)) {
-			static const char silence[1 << 15] = {0};
-			SDL_ClearQueuedAudio(P.audio);
-			Uint32 pre = (Uint32) state->audio_rate * 4 / 1000 * AUDIO_PREROLL_MS;
-			if (pre > sizeof(silence)) pre = (Uint32) sizeof(silence);
-			if (pre) (void) SDL_QueueAudio(P.audio, silence, pre);
-		}
-		int n = app_take_audio(app, &data);
-		if (n > 0 && SDL_QueueAudio(P.audio, data, (Uint32) n * 4) != 0) {
-			debug_log_warn("SDL_QueueAudio web falló: %s", SDL_GetError());
-		}
-	}
 }
 #endif
 

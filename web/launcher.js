@@ -190,7 +190,7 @@
     if (!storagePersistent || !storageReady || syncPending) return;
     syncPending = true;
     syncFilesystem(false).catch(error => console.warn('No se pudo guardar IDBFS', error)).finally(() => { syncPending = false; });
-  }, 5000);
+  }, 15000);
   window.addEventListener('pagehide', () => {
     if (storagePersistent && storageReady) {
       try { Module.FS.syncfs(false, error => { if (error) console.warn(error); }); } catch (_) {}

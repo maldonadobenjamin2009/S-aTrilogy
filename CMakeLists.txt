@@ -139,15 +139,16 @@ endif()
 if(EMSCRIPTEN)
   add_executable(SonicAdvanceTrilogy src/main_sdl.c)
   # --use-port=sdl2 proporciona tanto las cabeceras como la implementación SDL para navegador.
-  target_compile_options(SonicAdvanceTrilogy PRIVATE --use-port=sdl2 -O2)
-  target_compile_options(emu_core PRIVATE -O2)
-  target_compile_options(launcher_core PRIVATE -O2)
+  # -O3 + LTO para optimizar el núcleo C de mGBA y el renderizador por software.
+  target_compile_options(SonicAdvanceTrilogy PRIVATE --use-port=sdl2 -O3 -flto)
+  target_compile_options(emu_core PRIVATE -O3 -flto)
+  target_compile_options(launcher_core PRIVATE -O3 -flto)
   target_link_libraries(SonicAdvanceTrilogy PRIVATE launcher_core)
   target_link_options(SonicAdvanceTrilogy PRIVATE
+    -O3 -flto
     --use-port=sdl2
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
     "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/dist/assets@/assets"
-    "-sASYNCIFY=1"
     "-sALLOW_MEMORY_GROWTH=1"
     "-sFORCE_FILESYSTEM=1"
     "-sEXPORTED_RUNTIME_METHODS=FS,callMain"

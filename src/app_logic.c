@@ -907,7 +907,13 @@ int app_audio_reset_requested(App* a) { int r = a->audio_reset; a->audio_reset =
 
 void app_audio_feedback(App* a, int queued_frames) {
 	if (!a->emu || a->state != ST_GAME || a->host.audio_rate <= 0) return;
+#if defined(__EMSCRIPTEN__)
+	/* El navegador programa frames con requestAnimationFrame y puede tener
+	 * pequeñas variaciones entre callbacks. Mantener ~50 ms evita underflow. */
+	double target = a->host.audio_rate * 0.050;
+#else
 	double target = a->host.audio_rate * 0.040;
+#endif
 	if (a->audio_fill_avg <= 0) a->audio_fill_avg = target;
 	a->audio_fill_avg += (queued_frames - a->audio_fill_avg) * 0.02;
 	double err = (target - a->audio_fill_avg) / target;
