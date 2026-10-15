@@ -12,7 +12,8 @@ static FILE* s_log_file;
 
 static void make_log_path(char* out, size_t size) {
 #if defined(__ORBIS__) || defined(PS4)
-    snprintf(out, size, "/data/SonicAdvanceTrilogy/main_errors.log");
+    /* Match the writable path used by PS4-SDL-Template. */
+    snprintf(out, size, "/data/SDL_Log.txt");
     return;
 #elif defined(_WIN32)
     char exe[MAX_PATH * 4];
@@ -37,6 +38,9 @@ void debug_log_init(void) {
     char path[4096];
     make_log_path(path, sizeof(path));
     s_log_file = fopen(path, "a");
+#if defined(__ORBIS__) || defined(PS4)
+    if (!s_log_file) s_log_file = fopen("/data/SonicAdvanceTrilogy/main_errors.log", "a");
+#endif
     if (!s_log_file && strcmp(path, "main_errors.log") != 0) s_log_file = fopen("main_errors.log", "a");
     if (s_log_file) {
         time_t now = time(NULL);
