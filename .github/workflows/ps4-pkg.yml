@@ -146,14 +146,22 @@ jobs:
           echo "ROMs included in package: $count"
           echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
 
-      - name: Build PS4 ELF and PKG with OpenOrbis
+      - name: Build Sonic Advance Trilogy PS4 PKG
         shell: bash
         run: make -f ps4/Makefile
 
-      - name: Upload PS4 PKG artifact
+      - name: Build minimal SDL2 PS4 smoke-test PKG
+        shell: bash
+        run: |
+          set -euo pipefail
+          make -f ps4/Makefile PS4_SMOKE_TEST=1
+
+      - name: Upload PS4 test packages
         uses: actions/upload-artifact@v4
         with:
-          name: SonicAdvanceTrilogy-PS4-PKG
-          path: build-ps4/SonicAdvanceTrilogy-PS4.pkg
+          name: PS4-Diagnostics-PKGs
+          path: |
+            build-ps4/SonicAdvanceTrilogy-PS4.pkg
+            build-ps4-smoke/SAT-PS4-Smoke-Test.pkg
           if-no-files-found: error
           retention-days: 14
