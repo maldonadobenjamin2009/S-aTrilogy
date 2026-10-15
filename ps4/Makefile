@@ -5,13 +5,24 @@
 ROOT := .
 MGBA := third_party/mgba
 SDK := $(OO_PS4_TOOLCHAIN)
+ifeq ($(PS4_SMOKE_TEST),1)
+BUILD := build-ps4-smoke
+TITLE := SAT PS4 Smoke Test
+TITLE_ID := SATSM0001
+CONTENT_ID := IV0000-SATSM0001_00-SATPS4SMOKETEST00
+PKG_NAME := SAT-PS4-Smoke-Test.pkg
+APP_SRCS := src/ps4_smoke.c src/debug_log.c
+else
 BUILD := build-ps4
-OBJDIR := $(BUILD)/obj
-STAGE := $(BUILD)/stage
 TITLE := Sonic Advance Trilogy
-VERSION := 1.00
 TITLE_ID := BREW00142
 CONTENT_ID := IV0000-BREW00142_00-SONICADVANCE0000
+PKG_NAME := SonicAdvanceTrilogy-PS4.pkg
+APP_SRCS := src/emu.c src/debug_log.c src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/app_logic.c src/app_ui.c src/main_sdl.c
+endif
+OBJDIR := $(BUILD)/obj
+STAGE := $(BUILD)/stage
+VERSION := 1.00
 PAID := 0x3800000000000011
 
 ARM_SRC := arm.c decoder-arm.c decoder.c decoder-thumb.c isa-arm.c isa-thumb.c
@@ -27,8 +38,7 @@ MGBA_SRCS := $(addprefix $(MGBA)/src/arm/,$(ARM_SRC)) \
   $(MGBA)/src/feature/thread-proxy.c $(MGBA)/src/feature/video-logger.c \
   third_party/version.c $(wildcard $(MGBA)/src/platform/posix/*.c) \
   $(MGBA)/src/util/vfs/vfs-dirent.c
-APP_SRCS := src/emu.c src/debug_log.c src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/app_logic.c src/app_ui.c src/main_sdl.c
-SRCS := $(MGBA_SRCS) $(APP_SRCS)
+SRCS := $(if $(filter 1,$(PS4_SMOKE_TEST)),$(APP_SRCS),$(MGBA_SRCS) $(APP_SRCS))
 OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 
 CC := clang
@@ -68,7 +78,7 @@ $(BUILD)/SonicAdvanceTrilogy.elf: $(OBJS)
 	$(LD) $(OBJS) -o "$@" $(LDFLAGS)
 
 package: $(BUILD)/SonicAdvanceTrilogy.elf
-	@bash ps4/package.sh "$(abspath $(BUILD)/SonicAdvanceTrilogy.elf)" "$(abspath $(STAGE))" "$(SDK)" "$(CONTENT_ID)" "$(TITLE_ID)" "$(VERSION)" "$(TITLE)"
+	@bash ps4/package.sh "$(abspath $(BUILD)/SonicAdvanceTrilogy.elf)" "$(abspath $(STAGE))" "$(SDK)" "$(CONTENT_ID)" "$(TITLE_ID)" "$(VERSION)" "$(TITLE)" "$(PKG_NAME)"
 
 clean:
 	rm -rf "$(BUILD)"
