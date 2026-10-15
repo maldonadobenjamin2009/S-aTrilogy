@@ -1,0 +1,64 @@
+name: Build and deploy Sonic Advance Trilogy WebAssembly
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar repositorio
+        uses: actions/checkout@v4
+
+      - name: Instalar Emscripten
+        uses: emscripten-core/setup-emsdk@v15
+
+      - name: Verificar compilador
+        run: emcc -v
+
+      - name: Configurar compilación web
+        run: emcmake cmake -S . -B build-web -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=OFF
+
+      - name: Compilar el programa C para WebAssembly
+        run: cmake --build build-web --target SonicAdvanceTrilogy --parallel 2
+
+      - name: Preparar sitio de GitHub Pages
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site
+          cp build-web/index.html build-web/index.js build-web/index.wasm build-web/index.data site/
+          cp web/launcher.js web/styles.css site/
+          mkdir -p site/licencias
+          cp third_party/mgba/LICENSE site/licencias/mGBA-LICENSE-MPL-2.0.txt
+          cp third_party/DejaVu-LICENSE.txt site/licencias/DejaVu-LICENSE.txt
+          touch site/.nojekyll
+          echo "Archivos web compilados:"
+          ls -lh site
+
+      - name: Cargar artefacto de Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Publicar en GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
