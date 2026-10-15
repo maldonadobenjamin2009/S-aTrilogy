@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07111f">
+  <meta name="description" content="Sonic Advance Trilogy: hub C/SDL2 compilado para jugar en Chrome con WebAssembly.">
+  <title>Sonic Advance Trilogy</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">PORT WEB · SDL2 + mGBA · WASM</p>
+        <h1>Sonic Advance Trilogy</h1>
+        <p class="subtitle">La aplicación C original, compilada para ejecutarse dentro de Chrome.</p>
+      </div>
+      <button id="fullscreen" class="button secondary" type="button" disabled>Pantalla completa</button>
+    </header>
+
+    <section class="rom-panel" aria-labelledby="rom-title">
+      <div class="panel-heading">
+        <div>
+          <h2 id="rom-title">Tus ROMs</h2>
+          <p>Elegí tus archivos locales. No se suben a GitHub ni a ningún servidor.</p>
+        </div>
+        <button id="start-app" class="button primary" type="button" disabled>Iniciar hub</button>
+      </div>
+      <div class="rom-grid">
+        <label class="rom-picker">
+          <span class="rom-number">01</span>
+          <span class="rom-name">Sonic Advance</span>
+          <span class="rom-file">sonicadvance.gba</span>
+          <input type="file" accept=".gba,.bin,.rom,application/octet-stream" data-rom="sonicadvance.gba" aria-label="Seleccionar ROM de Sonic Advance">
+          <span class="rom-status" data-status-for="sonicadvance.gba">Elegir archivo…</span>
+        </label>
+        <label class="rom-picker">
+          <span class="rom-number">02</span>
+          <span class="rom-name">Sonic Advance 2</span>
+          <span class="rom-file">sonicadvance2.gba</span>
+          <input type="file" accept=".gba,.bin,.rom,application/octet-stream" data-rom="sonicadvance2.gba" aria-label="Seleccionar ROM de Sonic Advance 2">
+          <span class="rom-status" data-status-for="sonicadvance2.gba">Elegir archivo…</span>
+        </label>
+        <label class="rom-picker">
+          <span class="rom-number">03</span>
+          <span class="rom-name">Sonic Advance 3</span>
+          <span class="rom-file">sonicadvance3.gba</span>
+          <input type="file" accept=".gba,.bin,.rom,application/octet-stream" data-rom="sonicadvance3.gba" aria-label="Seleccionar ROM de Sonic Advance 3">
+          <span class="rom-status" data-status-for="sonicadvance3.gba">Elegir archivo…</span>
+        </label>
+      </div>
+      <p id="status" class="status" role="status" aria-live="polite">Descargando y preparando el motor WebAssembly…</p>
+    </section>
+
+    <section class="screen-panel" aria-label="Ventana de Sonic Advance Trilogy">
+      <canvas id="canvas" tabindex="0" oncontextmenu="event.preventDefault()" aria-label="Pantalla de la aplicación"></canvas>
+      <div class="screen-overlay" id="screen-overlay">
+        <div class="spinner" aria-hidden="true"></div>
+        <p>Preparando el runtime de C…</p>
+      </div>
+    </section>
+
+    <footer class="footnote">
+      <span>El hub, los menús, la emulación, los ajustes y las ranuras proceden del código C del proyecto.</span>
+      <span>Los guardados y ROMs importadas se almacenan en este navegador.</span>
+      <span><a href="licencias/mGBA-LICENSE-MPL-2.0.txt">Licencia de mGBA</a> · <a href="licencias/DejaVu-LICENSE.txt">Licencia tipográfica</a></span>
+    </footer>
+  </main>
+
+  <script>
+    var Module = {
+      canvas: document.getElementById('canvas'),
+      print: function (text) { console.log('[S-aTrilogy]', text); },
+      printErr: function (text) { console.error('[S-aTrilogy]', text); },
+      onRuntimeInitialized: function () {
+        window.SATModuleInitialized = true;
+        window.dispatchEvent(new Event('sat-module-ready'));
+      },
+      onAbort: function (reason) {
+        window.dispatchEvent(new CustomEvent('sat-runtime-error', { detail: String(reason) }));
+      }
+    };
+  </script>
+  {{{ SCRIPT }}}
+  <script src="launcher.js"></script>
+</body>
+</html>
