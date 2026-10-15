@@ -676,7 +676,9 @@ static void on_key_down(App* a, int k, int alt) {
 		else if (a->capture_kind == 0) { assign(a, 0, a->capture_act, k); a->capture_kind = -1; }
 		return;
 	}
-	if (k == K_F11 || (k == K_RETURN && alt)) { toggle_fullscreen(a); return; }
+	/* En 2J se reserva AltGr + Enter porque AltGr es el botón B de J2
+	 * y Enter es Start; fuera de 2J se conserva Alt+Enter para pantalla completa. */
+	if (k == K_F11 || (k == K_RETURN && alt && !a->emu2)) { toggle_fullscreen(a); return; }
 	if (a->state == ST_GAME) {
 		if (a->emu2) {
 			/* En 2J la tecla de pausa y los guardados rápidos siguen siendo globales;
