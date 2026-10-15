@@ -616,6 +616,89 @@ static void pump_events(App* app) {
 	}
 }
 
+#if defined(__EMSCRIPTEN__)
+/* En navegador se usa el event loop de Emscripten. El loop anterior dormía con
+ * Asyncify después de cada present; junto con la presentación de SDL podía
+ * sumar dos esperas por fotograma y vaciar la cola de audio. */
+typedef struct {
+	App* app;
+	Uint32 max_bytes;
+	int audio_rate;
+	double freq;
+	double last;
+} WebLoopState;
+
+static WebLoopState s_web_loop;
+
+static void web_loop_cleanup(void) {
+	debug_log_info("Saliendo del bucle web; liberando recursos");
+	for (int i = 0; i < 16; i++) {
+		if (P.pads[i]) {
+			SDL_GameControllerClose(P.pads[i]);
+			P.pads[i] = NULL;
+		}
+	}
+	if (P.audio) { SDL_CloseAudioDevice(P.audio); P.audio = 0; }
+	SDL_DestroyTexture(P.tex_ui); P.tex_ui = NULL;
+	SDL_DestroyTexture(P.tex_game_sharp); P.tex_game_sharp = NULL;
+	SDL_DestroyTexture(P.tex_game_smooth); P.tex_game_smooth = NULL;
+	SDL_DestroyTexture(P.tex_game2_sharp); P.tex_game2_sharp = NULL;
+	SDL_DestroyTexture(P.tex_game2_smooth); P.tex_game2_smooth = NULL;
+	SDL_DestroyRenderer(P.ren); P.ren = NULL;
+	SDL_DestroyWindow(P.win); P.win = NULL;
+	SDL_Quit();
+	debug_log_close();
+}
+
+static void web_loop_frame(void* userdata) {
+	WebLoopState* state = (WebLoopState*) userdata;
+	App* app = state->app;
+	pump_events(app);
+
+	double now = (double) SDL_GetPerformanceCounter() / state->freq;
+	double dt = now - state->last;
+	state->last = now;
+	if (dt < 0.0) dt = 0.0;
+	if (dt > 0.1) dt = 0.1;
+
+	if (P.audio) {
+		Uint32 queued = SDL_GetQueuedAudioSize(P.audio);
+		if (queued > state->max_bytes) {
+			SDL_ClearQueuedAudio(P.audio);
+			queued = 0;
+		}
+		app_audio_feedback(app, (int) (queued / 4));
+	}
+
+	if (!app_update(app, dt)) {
+		emscripten_cancel_main_loop();
+		web_loop_cleanup();
+		app_destroy(app);
+		state->app = NULL;
+		return;
+	}
+
+	AppFrame frame;
+	app_render(app, &frame);
+	present(app, &frame);
+
+	if (P.audio) {
+		const int16_t* data = NULL;
+		if (app_audio_reset_requested(app)) {
+			static const char silence[1 << 15] = {0};
+			SDL_ClearQueuedAudio(P.audio);
+			Uint32 pre = (Uint32) state->audio_rate * 4 / 1000 * AUDIO_PREROLL_MS;
+			if (pre > sizeof(silence)) pre = (Uint32) sizeof(silence);
+			if (pre) (void) SDL_QueueAudio(P.audio, silence, pre);
+		}
+		int n = app_take_audio(app, &data);
+		if (n > 0 && SDL_QueueAudio(P.audio, data, (Uint32) n * 4) != 0) {
+			debug_log_warn("SDL_QueueAudio web falló: %s", SDL_GetError());
+		}
+	}
+}
+#endif
+
 /* --------------------------------------------------------------------------- main */
 #if defined(__ANDROID__)
 #define APP_ENTRY SDL_main
@@ -845,6 +928,18 @@ int APP_ENTRY(int argc, char** argv) {
 #endif
 	send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count());
 
+#if defined(__EMSCRIPTEN__)
+	/* El loop web se programa por el navegador a 60 Hz. No bloquea el hilo con
+	 * emscripten_sleep ni necesita Asyncify; el audio se rellena una vez por tick. */
+	s_web_loop.app = app;
+	s_web_loop.max_bytes = max_bytes;
+	s_web_loop.audio_rate = host.audio_rate;
+	s_web_loop.freq = (double) SDL_GetPerformanceFrequency();
+	s_web_loop.last = (double) SDL_GetPerformanceCounter() / s_web_loop.freq;
+	debug_log_info("WebAssembly: iniciando event loop de navegador a 60 Hz");
+	emscripten_set_main_loop_arg(web_loop_frame, &s_web_loop, 60, 0);
+	return 0;
+#else
 #if defined(__ORBIS__) || defined(PS4)
 	/* El SDL de Orbis no expone SDL_GetPerformanceFrequency de forma uniforme en
 	 * todas las builds. SDL_GetTicks sí es el reloj usado por el sample de OpenOrbis. */
@@ -944,6 +1039,7 @@ int APP_ENTRY(int argc, char** argv) {
 #endif
 	}
 
+
 	debug_log_info("El bucle principal terminó; liberando recursos");
 	app_destroy(app);
 	if (P.audio) SDL_CloseAudioDevice(P.audio);
@@ -954,4 +1050,5 @@ int APP_ENTRY(int argc, char** argv) {
 	SDL_Quit();
 	debug_log_close();
 	return 0;
+#endif
 }
