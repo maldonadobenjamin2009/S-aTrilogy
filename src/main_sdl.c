@@ -663,7 +663,9 @@ int APP_ENTRY(int argc, char** argv) {
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_ALLOW_HIGHDPI);
 #elif defined(__ORBIS__) || defined(PS4)
 	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
-	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, ps4_screen_w, ps4_screen_h, SDL_WINDOW_FULLSCREEN);
+	/* El port SDL de OpenOrbis suele usar una ventana sin flags; el modo fullscreen
+	 * genérico no está implementado del mismo modo en todas sus builds. */
+	P.win = SDL_CreateWindow("Sonic Advance Trilogy", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, ps4_screen_w, ps4_screen_h, 0);
 #else
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy Launcher", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 #endif
@@ -681,12 +683,19 @@ int APP_ENTRY(int argc, char** argv) {
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
 	if (!P.ren) { debug_log_warn("Renderizador acelerado no disponible: %s", SDL_GetError()); P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE); }
 #elif defined(__ORBIS__) || defined(PS4)
-	/* No pedir SDL_RENDERER_ACCELERATED en Orbis: algunas builds de OpenOrbis
-	 * crean ese renderer aunque el backend GPU no esté listo y la salida queda negra.
-	 * El sample SDL2 de OpenOrbis usa explícitamente SDL_RENDERER_SOFTWARE. */
-	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0");
-	SDL_SetHint(SDL_HINT_RENDER_DRIVER, "software");
-	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE);
+	/* El port SDL2 de PS4 usa el renderer acelerado con present sincronizado.
+	 * Forzar SOFTWARE puede crear un renderer sin una ruta de presentación válida
+	 * en este backend y producir CPU activa, GPU inactiva y pantalla negra. */
+	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
+	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+	if (!P.ren) {
+		debug_log_warn("PS4: renderer acelerado+vsync no disponible: %s", SDL_GetError());
+		P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
+	}
+	if (!P.ren) {
+		debug_log_warn("PS4: renderer acelerado sin vsync no disponible: %s", SDL_GetError());
+		P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE);
+	}
 #else
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0"); /* el reloj del launcher fija los fotogramas */
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
@@ -697,18 +706,36 @@ int APP_ENTRY(int argc, char** argv) {
 		if (SDL_GetRendererInfo(P.ren, &ri) == 0) {
 			debug_log_info("Renderizador: %s (flags=0x%x, formatos=%u)", ri.name, (unsigned) ri.flags, (unsigned) ri.num_texture_formats);
 #if defined(__ORBIS__) || defined(PS4)
-			debug_log_info("PS4: usando renderer software de SDL; la ausencia de actividad GPU dedicada es esperable con este backend");
+			debug_log_info("PS4: renderer seleccionado=%s; flags=0x%x; formatos de textura=%u", ri.name,
+			               (unsigned) ri.flags, (unsigned) ri.num_texture_formats);
+			for (Uint32 fi = 0; fi < ri.num_texture_formats; ++fi)
+				debug_log_info("PS4: texture_format[%u]=0x%08x", (unsigned) fi, (unsigned) ri.texture_formats[fi]);
 #endif
 		}
 	}
 	if (!P.ren) { debug_log_error("No se pudo crear el renderizador: %s", SDL_GetError()); SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1; }
+#if defined(__ORBIS__) || defined(PS4)
+	/* Prueba visible antes de cargar los assets (que pueden tardar por el reescalado).
+	 * Si esto tampoco aparece, el problema está en la salida SDL/renderer, no en mGBA. */
+	debug_log_info("PS4: enviando fotograma de diagnóstico antes de cargar recursos");
+	SDL_SetRenderDrawColor(P.ren, 18, 62, 130, 255);
+	if (SDL_RenderClear(P.ren) != 0) debug_log_error("PS4: SDL_RenderClear de diagnóstico falló: %s", SDL_GetError());
+	SDL_Rect boot_bar = { ps4_screen_w / 8, ps4_screen_h / 3, ps4_screen_w * 3 / 4, ps4_screen_h / 12 };
+	SDL_SetRenderDrawColor(P.ren, 235, 190, 45, 255);
+	if (SDL_RenderFillRect(P.ren, &boot_bar) != 0) debug_log_error("PS4: SDL_RenderFillRect de diagnóstico falló: %s", SDL_GetError());
+	SDL_RenderPresent(P.ren);
+	SDL_Delay(250);
+	debug_log_info("PS4: fotograma de diagnóstico enviado; creando texturas del launcher");
+#endif
 	P.tex_ui = make_tex(SDL_PIXELFORMAT_ARGB8888, UI_W, UI_H, 1, SDL_BLENDMODE_BLEND);
 	P.tex_game_sharp = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 0, SDL_BLENDMODE_NONE);
 	P.tex_game_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
 	P.tex_game2_sharp = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 0, SDL_BLENDMODE_NONE);
 	P.tex_game2_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
 	if (!P.tex_ui || !P.tex_game_sharp || !P.tex_game_smooth || !P.tex_game2_sharp || !P.tex_game2_smooth) {
-		debug_log_error("No se pudieron crear las texturas: %s", SDL_GetError());
+		debug_log_error("No se pudieron crear las texturas: %s (UI=%p GBAsharp=%p GBAsmooth=%p J2sharp=%p J2smooth=%p)", SDL_GetError(),
+		                (void*)P.tex_ui, (void*)P.tex_game_sharp, (void*)P.tex_game_smooth,
+		                (void*)P.tex_game2_sharp, (void*)P.tex_game2_smooth);
 		return 1;
 	}
 #if defined(__ORBIS__) || defined(PS4)
@@ -764,6 +791,9 @@ int APP_ENTRY(int argc, char** argv) {
 	for (int i = 0; i < SDL_NumJoysticks(); i++) open_pad(i);
 	debug_log_info("Mandos reconocidos al iniciar: %d", opened_pad_count());
 
+#if defined(__ORBIS__) || defined(PS4)
+	debug_log_info("PS4: entrando en app_create; puede tardar procesando carátulas");
+#endif
 	App* app = app_create(base, &host);
 	if (!app) { debug_log_error("No se pudo iniciar el launcher: app_create devolvió NULL"); if (P.audio) SDL_CloseAudioDevice(P.audio); SDL_Quit(); debug_log_close(); return 1; }
 #if defined(__ORBIS__) || defined(PS4)

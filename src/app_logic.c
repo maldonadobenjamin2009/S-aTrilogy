@@ -972,9 +972,19 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	a->last_slot = 1;
 	a->game_idx = 0;
 	for (int i = 0; i < NUM_GAMES; i++) a->anim[i] = i == 0 ? 1.0f : 0.0f;
+	debug_log_info("app_create: base=%s; ROMs=%s; assets=%s", a->base, a->roms_dir, a->assets_dir);
+	debug_log_info("app_create: escaneando ROMs");
 	app_scan_roms(a);
+	debug_log_info("app_create: escaneo ROMs terminado");
 	a->ui = cv_new(UI_W, UI_H);
+	if (!a->ui) {
+		debug_log_error("app_create: no hay memoria para el lienzo de UI (%dx%d)", UI_W, UI_H);
+		free(a);
+		return NULL;
+	}
+	debug_log_info("app_create: cargando y preparando assets de UI");
 	ui_load_assets(a);
+	debug_log_info("app_create: assets de UI preparados");
 	if (a->cfg.fullscreen && a->host.set_fullscreen) a->host.set_fullscreen(a->host.user, 1);
 	return a;
 }

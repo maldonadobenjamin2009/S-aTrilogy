@@ -1,6 +1,7 @@
 /* app_ui.c - todas las pantallas del launcher, dibujadas por software en un lienzo 1920x1080. */
 #include "app_internal.h"
 #include "sys.h"
+#include "debug_log.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -95,26 +96,40 @@ void ui_load_assets(App* a) {
 		if (bg) { cv_shade(bg, 150); for (int i = 0; i < UI_W * UI_H; i++) bg->px[i] |= 0xFF000000u; cv_free(a->bg_base); a->bg_base = bg; }
 	}
 	for (int i = 0; i < NUM_GAMES; i++) {
-		Canvas *art, *big;
+		/* El fondo difuminado solo conserva 80x45 píxeles de detalle. No hace falta
+		 * escalar primero la carátula a 1920x1080 para reducirla inmediatamente:
+		 * en PS4 eso dispara uso de CPU/memoria antes del primer fotograma visible. */
+		Canvas *art, *tiny;
+		debug_log_info("ui_load_assets: preparando caratula %d/%d (%s)", i + 1, NUM_GAMES, GAMES[i].art);
 		raw = load_png_named(a->games_art_dir, GAMES[i].art);
-		if (raw) { art = cv_cover(raw, 560, 315); big = cv_cover(raw, UI_W, UI_H); cv_free(raw); }
-		else {
+		if (raw) {
+			art = cv_cover(raw, 560, 315);
+			tiny = cv_cover(raw, UI_W / 24, UI_H / 24);
+			cv_free(raw);
+		} else {
 			art = make_placeholder(&GAMES[i], 560, 315);
-			Canvas* small = make_placeholder(&GAMES[i], UI_W / 4, UI_H / 4);
-			big = cv_resize(small, UI_W, UI_H);
-			cv_free(small);
+			tiny = make_placeholder(&GAMES[i], UI_W / 24, UI_H / 24);
+		}
+		if (!art || !tiny) {
+			debug_log_error("ui_load_assets: no se pudo reservar memoria para %s", GAMES[i].art);
+			cv_free(art);
+			cv_free(tiny);
+			continue;
 		}
 		a->cards_dark[i] = cv_copy(art);
-		cv_shade(a->cards_dark[i], 212);                      /* filtro negro: juego sin ROM */
-		cv_round_corners(a->cards_dark[i], 20);
+		if (a->cards_dark[i]) {
+			cv_shade(a->cards_dark[i], 212);                  /* filtro negro: juego sin ROM */
+			cv_round_corners(a->cards_dark[i], 20);
+		}
 		cv_round_corners(art, 20);
 		a->cards[i] = art;
-		Canvas* tiny = cv_resize(big, UI_W / 24, UI_H / 24);
 		Canvas* blur = cv_resize(tiny, UI_W, UI_H);
-		cv_shade(blur, 165);
-		for (int p = 0; p < UI_W * UI_H; p++) blur->px[p] |= 0xFF000000u;
+		if (blur) {
+			cv_shade(blur, 165);
+			for (int p = 0; p < UI_W * UI_H; p++) blur->px[p] |= 0xFF000000u;
+		}
 		a->backdrops[i] = blur;
-		cv_free(tiny); cv_free(big);
+		cv_free(tiny);
 	}
 }
 
