@@ -43,6 +43,10 @@ typedef struct {
 	SDL_AudioDeviceID audio;
 	SDL_GameController* pads[16];
 	int fullscreen;
+#if defined(__ORBIS__) || defined(PS4)
+	/* SDL-PS4 presenta el contenido mediante la superficie de ventana. */
+	SDL_Surface* window_surface;
+#endif
 #if defined(__ANDROID__)
 	int last_in_game;
 	TouchPoint touches[16];
@@ -463,7 +467,14 @@ static void ensure_touch_texture(int w, int h, int paused) {
 static void present(App* app, const AppFrame* f) {
 	(void) app;
 	int ow, oh;
+#if defined(__ORBIS__) || defined(PS4)
+	/* SDL_CreateSoftwareRenderer trabaja directamente sobre esta superficie y
+	 * no todas las builds devuelven tamaño válido desde GetRendererOutputSize. */
+	ow = P.window_surface ? P.window_surface->w : 1280;
+	oh = P.window_surface ? P.window_surface->h : 720;
+#else
 	SDL_GetRendererOutputSize(P.ren, &ow, &oh);
+#endif
 	SDL_SetRenderDrawColor(P.ren, 0, 0, 0, 255);
 	SDL_RenderClear(P.ren);
 	if (f->in_game && f->game) {
@@ -501,7 +512,20 @@ static void present(App* app, const AppFrame* f) {
 		draw_touch_stick_knob(ow, oh, paused);
 	}
 #endif
+#if defined(__ORBIS__) || defined(PS4)
+	/* El port SDL2 de OpenOrbis requiere una actualización explícita de la
+	 * superficie de ventana para que el fotograma llegue a la salida de vídeo. */
+	static unsigned surface_present_errors = 0;
+	if (SDL_UpdateWindowSurface(P.win) != 0) {
+		if (surface_present_errors < 5) {
+			debug_log_error("PS4: SDL_UpdateWindowSurface falló (%u): %s",
+			                surface_present_errors + 1, SDL_GetError());
+		}
+		surface_present_errors++;
+	}
+#else
 	SDL_RenderPresent(P.ren);
+#endif
 }
 
 /* ------------------------------------------------------------------------- entrada */
@@ -683,19 +707,24 @@ int APP_ENTRY(int argc, char** argv) {
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
 	if (!P.ren) { debug_log_warn("Renderizador acelerado no disponible: %s", SDL_GetError()); P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE); }
 #elif defined(__ORBIS__) || defined(PS4)
-	/* El port SDL2 de PS4 usa el renderer acelerado con present sincronizado.
-	 * Forzar SOFTWARE puede crear un renderer sin una ruta de presentación válida
-	 * en este backend y producir CPU activa, GPU inactiva y pantalla negra. */
-	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "1");
-	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
-	if (!P.ren) {
-		debug_log_warn("PS4: renderer acelerado+vsync no disponible: %s", SDL_GetError());
-		P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
+	SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "0");
+	/* Usar el patrón de presentación del sample SDL2 de OpenOrbis: renderizar
+	 * sobre SDL_GetWindowSurface() y hacer flip con SDL_UpdateWindowSurface().
+	 * SDL_RenderPresent() no garantiza la presentación en este port de Orbis. */
+	P.window_surface = SDL_GetWindowSurface(P.win);
+	if (!P.window_surface) {
+		debug_log_error("PS4: SDL_GetWindowSurface falló: %s", SDL_GetError());
+		SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1;
 	}
+	debug_log_info("PS4: superficie SDL %dx%d pitch=%d formato=0x%08x",
+	               P.window_surface->w, P.window_surface->h, P.window_surface->pitch,
+	               (unsigned) P.window_surface->format->format);
+	P.ren = SDL_CreateSoftwareRenderer(P.window_surface);
 	if (!P.ren) {
-		debug_log_warn("PS4: renderer acelerado sin vsync no disponible: %s", SDL_GetError());
-		P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_SOFTWARE);
+		debug_log_error("PS4: SDL_CreateSoftwareRenderer falló: %s", SDL_GetError());
+		SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1;
 	}
+	debug_log_info("PS4: renderer software sobre surface; presentacion mediante SDL_UpdateWindowSurface");
 #else
 	SDL_SetHint(SDL_HINT_RENDER_VSYNC, "0"); /* el reloj del launcher fija los fotogramas */
 	P.ren = SDL_CreateRenderer(P.win, -1, SDL_RENDERER_ACCELERATED);
@@ -723,7 +752,11 @@ int APP_ENTRY(int argc, char** argv) {
 	SDL_Rect boot_bar = { ps4_screen_w / 8, ps4_screen_h / 3, ps4_screen_w * 3 / 4, ps4_screen_h / 12 };
 	SDL_SetRenderDrawColor(P.ren, 235, 190, 45, 255);
 	if (SDL_RenderFillRect(P.ren, &boot_bar) != 0) debug_log_error("PS4: SDL_RenderFillRect de diagnóstico falló: %s", SDL_GetError());
-	SDL_RenderPresent(P.ren);
+	if (SDL_UpdateWindowSurface(P.win) != 0) {
+		debug_log_error("PS4: SDL_UpdateWindowSurface del diagnóstico falló: %s", SDL_GetError());
+	} else {
+		debug_log_info("PS4: SDL_UpdateWindowSurface del diagnóstico devolvió OK");
+	}
 	SDL_Delay(250);
 	debug_log_info("PS4: fotograma de diagnóstico enviado; creando texturas del launcher");
 #endif
