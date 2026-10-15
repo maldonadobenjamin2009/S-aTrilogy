@@ -3,7 +3,7 @@ name: PS4 PKG (OpenOrbis homebrew)
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, debug/ps4-smoke-tests ]
     paths:
       - 'src/**'
       - 'third_party/**'
