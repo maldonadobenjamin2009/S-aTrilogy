@@ -45,6 +45,15 @@ fi
   "$CREATE_FSELF" -in="$ELF" -out="$STAGE/SonicAdvanceTrilogy.oelf" --eboot "eboot.bin" --paid 0x3800000000000011
 )
 
+# No basta con que create-fself termine con código 0: confirma que produjo el
+# ejecutable real que se instalará en la consola, no solamente el ELF intermedio.
+if [ ! -s "$STAGE/eboot.bin" ]; then
+  echo "ERROR: create-fself terminó pero no generó un eboot.bin no vacío en $STAGE" >&2
+  exit 1
+fi
+echo "eBoot PS4 generado: $(stat -c '%s' "$STAGE/eboot.bin") bytes"
+file "$STAGE/eboot.bin" || true
+
 # Create param.sfo via the supported OpenOrbis packaging utility.
 "$PKGTOOL" sfo_new "$STAGE/sce_sys/param.sfo"
 "$PKGTOOL" sfo_setentry "$STAGE/sce_sys/param.sfo" APP_TYPE --type Integer --maxsize 4 --value 1
@@ -60,6 +69,12 @@ fi
 
 # GP4 must list every file placed in the application package.
 cd "$STAGE"
+for required in eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_module/libc.prx sce_module/libSceFios2.prx; do
+  if [ ! -s "$required" ]; then
+    echo "ERROR: falta un archivo obligatorio del paquete PS4: $required" >&2
+    exit 1
+  fi
+done
 FILES=$(find . -type f ! -name '*.pkg' ! -name 'pkg.gp4' ! -name '*.oelf' -printf '%P\n' | sort | tr '\n' ' ')
 "$CREATE_GP4" -out pkg.gp4 --content-id="$CONTENT_ID" --files "$FILES"
 "$PKGTOOL" pkg_build pkg.gp4 .
@@ -67,7 +82,8 @@ PKG_PATH="$STAGE/$CONTENT_ID.pkg"
 if [ ! -f "$PKG_PATH" ]; then
   PKG_PATH=$(find "$STAGE" -maxdepth 1 -type f -name '*.pkg' -print -quit)
 fi
-[ -n "${PKG_PATH:-}" ] && [ -f "$PKG_PATH" ] || { echo "ERROR: PkgTool.Core no generó un PKG" >&2; exit 1; }
+[ -n "${PKG_PATH:-}" ] && [ -s "$PKG_PATH" ] || { echo "ERROR: PkgTool.Core no generó un PKG no vacío" >&2; exit 1; }
+echo "PKG validado: $(stat -c '%s' "$PKG_PATH") bytes"
 mkdir -p "$(dirname "$STAGE")"
 cp "$PKG_PATH" "$(dirname "$STAGE")/SonicAdvanceTrilogy-PS4.pkg"
 echo "PKG creado: $(dirname "$STAGE")/SonicAdvanceTrilogy-PS4.pkg"
