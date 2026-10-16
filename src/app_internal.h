@@ -10,7 +10,7 @@
 #include <stdatomic.h>
 #endif
 
-#define NUM_GAMES 3
+#define NUM_GAMES 4
 #define SLOT_COUNT 8
 #define PAUSE_COUNT 8
 #define SET_COUNT 8
