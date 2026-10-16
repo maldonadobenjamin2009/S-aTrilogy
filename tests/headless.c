@@ -101,7 +101,7 @@ int main(int argc, char** argv) {
 	app = app_create(work, &host);
 	CHECK(app != NULL, "app_create");
 	CHECK(app->cfg.pad[0][ACT_PAUSE] == PAD_TOUCHPAD && app->cfg.pad[1][ACT_PAUSE] == PAD_TOUCHPAD, "panel táctil como pausa predeterminada");
-	printf("mGBA %s | roms: %d %d %d\n", emu_version(), app->rom_found[0], app->rom_found[1], app->rom_found[2]);
+	printf("mGBA %s | roms Advance: %d %d %d | Battle: %d\\n", emu_version(), app->rom_found[0], app->rom_found[1], app->rom_found[2], app->rom_found[3]);
 	CHECK(app->rom_found[0] && !app->rom_found[1] && !app->rom_found[2] && app->rom_found[3], "detección de las tres Advance y Sonic Battle");
 
 	step(30); shot("01_principal");
