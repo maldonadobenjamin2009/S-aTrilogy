@@ -973,6 +973,9 @@ void _lockstepEvent(struct mTiming* timing, void* context, uint32_t cyclesLate) 
 			break;
 		case SIO_EV_HARD_SYNC:
 			GBASIOLockstepCoordinatorAckPlayer(coordinator, player);
+			/* AckPlayer no bloquea las transferencias; los hard sync sí deben aparcar
+			 * al secundario mientras el maestro alcanza el mismo ciclo emulado. */
+			GBASIOLockstepPlayerSleep(player);
 			break;
 		case SIO_EV_TRANSFER_START:
 			_setData(coordinator, player->playerId, sio);
@@ -990,6 +993,7 @@ void _lockstepEvent(struct mTiming* timing, void* context, uint32_t cyclesLate) 
 			_setReady(coordinator, player, event->playerId, event->mode);
 			if (event->playerId == 0) {
 				GBASIOLockstepCoordinatorAckPlayer(coordinator, player);
+				GBASIOLockstepPlayerSleep(player);
 			}
 			break;
 		case SIO_EV_DETACH:
@@ -1081,17 +1085,31 @@ void GBASIOLockstepCoordinatorAckPlayer(struct GBASIOLockstepCoordinator* coordi
 				if (!coordinator->attachedPlayers[i]) {
 					continue;
 				}
-				struct GBASIOLockstepPlayer* player = TableLookup(&coordinator->players, coordinator->attachedPlayers[i]);
-				player->dataReceived = true;
+				struct GBASIOLockstepPlayer* attached = TableLookup(&coordinator->players, coordinator->attachedPlayers[i]);
+				attached->dataReceived = true;
 			}
 
 			coordinator->transferActive = false;
 		}
 
+		/* Re-arm the periodic barrier from the newly agreed cycle. Without this,
+		 * a delayed handshake can trigger back-to-back hard-syncs. */
+		coordinator->nextHardSync = HARD_SYNC_INTERVAL;
 		struct GBASIOLockstepPlayer* runner = TableLookup(&coordinator->players, coordinator->attachedPlayers[0]);
 		GBASIOLockstepPlayerWake(runner);
+		/* 3P/4P: a secondary that acked early may be asleep waiting for the last
+		 * acker. Wake everyone together so every core sees the same transfer data. */
+		GBASIOLockstepCoordinatorWakePlayers(coordinator);
+	} else if (coordinator->transferActive) {
+		/* A non-final secondary must wait until every peer has supplied the
+		 * transfer start acknowledgement; otherwise it can finish with stale FFFF
+		 * data before dataReceived is latched for all players. */
+		GBASIOLockstepPlayerSleep(player);
 	}
-	GBASIOLockstepPlayerSleep(player);
+	/* Do not blindly sleep here: the final transfer acker must continue to the
+	 * transfer-completion cycle. Sleeping it here delays its SIO IRQ relative to
+	 * the master and makes link handshakes appear intermittently disconnected.
+	 * HARD_SYNC and MODE_SET callers explicitly sleep when appropriate. */
 }
 
 void GBASIOLockstepPlayerSleep(struct GBASIOLockstepPlayer* player) {
