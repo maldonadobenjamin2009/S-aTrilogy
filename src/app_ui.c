@@ -398,7 +398,7 @@ static void draw_settings(App* a, Canvas* c) {
 
 static uint32_t cur_accent(const App* a) { return GAMES[a->emu ? a->game_idx : a->sel].accent; }
 
-
+static void draw_controls(App* a, Canvas* c) {
 	veil(c, 185);
 	Rect p = controls_panel();
 	uint32_t acc = cur_accent(a);
