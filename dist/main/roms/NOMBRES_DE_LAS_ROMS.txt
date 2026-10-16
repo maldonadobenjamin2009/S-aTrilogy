@@ -1,12 +1,13 @@
 NOMBRES QUE DEBEN TENER LAS ROMS
 ================================
 
-Pon tus ROMs de Sonic Advance (copias de tus propios cartuchos) en ESTA carpeta
+Pon copias de tus propios juegos de GBA en ESTA carpeta
 (main/roms) y renombralas EXACTAMENTE asi:
 
     Sonic Advance     ->  sonicadvance.gba
     Sonic Advance 2   ->  sonicadvance2.gba
     Sonic Advance 3   ->  sonicadvance3.gba
+    Sonic Battle     ->  sonicbattle.gba
 
 Los juegos cuya ROM no este en esta carpeta apareceran oscurecidos en el launcher.
 Si anades una ROM con el launcher abierto, se detecta sola en un segundo.
