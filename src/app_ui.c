@@ -42,6 +42,7 @@ Rect ui_slot_rect(int n) { return rect_make(100 + (n % 4) * 440, 200 + (n / 4) *
 Rect ui_modal_ok(void) { return rect_make(UI_W / 2 - 140, 640, 280, 70); }
 Rect ui_modal_yes(void) { return rect_make(UI_W / 2 - 300, 640, 260, 70); }
 Rect ui_modal_no(void) { return rect_make(UI_W / 2 + 40, 640, 260, 70); }
+Rect ui_modal_mode_rect(int mode) { if (mode < 0) mode = 0; if (mode > 2) mode = 2; return rect_make(UI_W / 2 - 390 + mode * 270, 640, 240, 70); }
 
 /* ------------------------------------------------------------------ recursos */
 typedef struct { const char* want; char found[PATH_MAX_APP]; const char* dir; } FindCtx;
@@ -523,7 +524,17 @@ static void draw_modal(App* a, Canvas* c) {
 	char lines[8][256];
 	int n = wrap_lines(a->modal_text, 28, box.w - 120, lines, 7);
 	for (int i = 0; i < n; i++) T(c, lines[i], UI_W / 2, box.y + 120 + i * 38, 28, C_SOFT, TX_CENTER);
-	if (a->modal_kind == 1) {
+	if (a->modal_kind == 1 && a->prompt_game == 3) {
+		for (int mode = 0; mode < 3; mode++) {
+			Rect r = ui_modal_mode_rect(mode);
+			int selected = a->modal_choice == mode;
+			panel(c, r, selected ? cur_accent(a) : ARGB(255, 28, 32, 54), 16,
+			      selected ? C_WHITE : ARGB(100, 255, 255, 255), selected ? 4 : 2);
+			char label[8];
+			snprintf(label, sizeof(label), "%dJ", mode + 1);
+			T(c, label, r.x + r.w / 2, r.y + r.h / 2, 32, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+		}
+	} else if (a->modal_kind == 1) {
 		Rect yes = ui_modal_yes(), no = ui_modal_no();
 		panel(c, yes, a->modal_choice == 0 ? cur_accent(a) : ARGB(255, 28, 32, 54), 16,
 		      a->modal_choice == 0 ? C_WHITE : ARGB(100, 255, 255, 255), a->modal_choice == 0 ? 4 : 2);
@@ -672,7 +683,8 @@ void app_render(App* a, AppFrame* out) {
 	out->in_game = 1;
 	out->game = a->have_frame ? a->frame : NULL;
 	out->game2 = (a->have_frame && a->emu2) ? a->frame2 : NULL;
-	out->multiplayer = a->emu2 != NULL;
+	out->game3 = (a->have_frame && a->emu3) ? a->frame3 : NULL;
+	out->multiplayer = a->emu3 ? 2 : (a->emu2 ? 1 : 0);
 	out->smooth = a->cfg.smooth;
 	out->integer_scale = a->cfg.integer_scale;
 	Canvas* c = a->ui;

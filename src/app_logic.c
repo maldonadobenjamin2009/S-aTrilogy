@@ -725,10 +725,11 @@ static void request_launch_check(App* a) {
 static void dispatch(App* a, int act) {
 	if (a->modal) {
 		if (a->modal_kind == 1) {
-			if (act == A_LEFT || act == A_UP) a->modal_choice = 0;
-			else if (act == A_RIGHT || act == A_DOWN) a->modal_choice = 1;
-			else if (act == A_ACCEPT) resolve_game_mode(a, a->modal_choice == 1);
-			else if (act == A_BACK) resolve_game_mode(a, 0);
+			int max_choice = a->prompt_game == 3 ? 2 : 1;
+			if (act == A_LEFT || act == A_UP) { if (a->modal_choice > 0) a->modal_choice--; }
+			else if (act == A_RIGHT || act == A_DOWN) { if (a->modal_choice < max_choice) a->modal_choice++; }
+			else if (act == A_ACCEPT) resolve_game_mode(a, a->modal_choice + 1);
+			else if (act == A_BACK) resolve_game_mode(a, 1);
 		} else if (act == A_ACCEPT || act == A_BACK) a->modal = 0;
 		return;
 	}
@@ -939,8 +940,14 @@ static void mouse_click(App* a, int x, int y) {
 	if (a->state == ST_GAME) return;
 	if (a->modal) {
 		if (a->modal_kind == 1) {
-			if (rect_has(ui_modal_yes(), x, y)) resolve_game_mode(a, 0);
-			else if (rect_has(ui_modal_no(), x, y)) resolve_game_mode(a, 1);
+			if (a->prompt_game == 3) {
+				for (int mode = 0; mode < 3; mode++) {
+					if (rect_has(ui_modal_mode_rect(mode), x, y)) { resolve_game_mode(a, mode + 1); return; }
+				}
+			} else {
+				if (rect_has(ui_modal_yes(), x, y)) resolve_game_mode(a, 1);
+				else if (rect_has(ui_modal_no(), x, y)) resolve_game_mode(a, 2);
+			}
 		} else if (rect_has(ui_modal_ok(), x, y)) a->modal = 0;
 		return;
 	}

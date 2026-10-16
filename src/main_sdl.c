@@ -42,7 +42,7 @@ typedef struct {
 typedef struct {
 	SDL_Window* win;
 	SDL_Renderer* ren;
-	SDL_Texture *tex_ui, *tex_game_sharp, *tex_game_smooth, *tex_game2_sharp, *tex_game2_smooth;
+	SDL_Texture *tex_ui, *tex_game_sharp, *tex_game_smooth, *tex_game2_sharp, *tex_game2_smooth, *tex_game3_sharp, *tex_game3_smooth;
 	SDL_AudioDeviceID audio;
 	SDL_GameController* pads[16];
 	int fullscreen;
@@ -483,22 +483,45 @@ static void present(App* app, const AppFrame* f) {
 	SDL_SetRenderDrawColor(P.ren, 0, 0, 0, 255);
 	SDL_RenderClear(P.ren);
 	if (f->in_game && f->game) {
-		int split = f->multiplayer && f->game2;
-		int half_w = split ? ow / 2 : ow;
-		float s = (float) half_w / EMU_W < (float) oh / EMU_H ? (float) half_w / EMU_W : (float) oh / EMU_H;
-		if (f->integer_scale && s >= 1.0f) s = (float) (int) s;
-		int dw = (int) (EMU_W * s), dh = (int) (EMU_H * s);
-		SDL_Rect d = {(half_w - dw) / 2, (oh - dh) / 2, dw, dh};
-		SDL_Texture* t = f->smooth ? P.tex_game_smooth : P.tex_game_sharp;
-		SDL_UpdateTexture(t, NULL, f->game, EMU_W * 4);
-		SDL_RenderCopy(P.ren, t, NULL, &d);
-		if (split) {
-			SDL_Rect d2 = {half_w + (half_w - dw) / 2, (oh - dh) / 2, dw, dh};
+		if (f->multiplayer == 2 && f->game2 && f->game3) {
+			/* Sonic Battle 3J: J1/J2 arriba en dos columnas y J3 centrado abajo. */
+			int half_w = ow / 2, half_h = oh / 2;
+			float s = (float) half_w / EMU_W < (float) half_h / EMU_H ? (float) half_w / EMU_W : (float) half_h / EMU_H;
+			if (f->integer_scale && s >= 1.0f) s = (float) (int) s;
+			int dw = (int) (EMU_W * s), dh = (int) (EMU_H * s);
+			SDL_Rect d1 = {(half_w - dw) / 2, (half_h - dh) / 2, dw, dh};
+			SDL_Rect d2 = {half_w + (half_w - dw) / 2, (half_h - dh) / 2, dw, dh};
+			SDL_Rect d3 = {(ow - dw) / 2, half_h + (half_h - dh) / 2, dw, dh};
+			SDL_Texture* t1 = f->smooth ? P.tex_game_smooth : P.tex_game_sharp;
 			SDL_Texture* t2 = f->smooth ? P.tex_game2_smooth : P.tex_game2_sharp;
+			SDL_Texture* t3 = f->smooth ? P.tex_game3_smooth : P.tex_game3_sharp;
+			SDL_UpdateTexture(t1, NULL, f->game, EMU_W * 4);
 			SDL_UpdateTexture(t2, NULL, f->game2, EMU_W * 4);
+			SDL_UpdateTexture(t3, NULL, f->game3, EMU_W * 4);
+			SDL_RenderCopy(P.ren, t1, NULL, &d1);
 			SDL_RenderCopy(P.ren, t2, NULL, &d2);
+			SDL_RenderCopy(P.ren, t3, NULL, &d3);
 			SDL_SetRenderDrawColor(P.ren, 70, 80, 112, 255);
-			SDL_RenderDrawLine(P.ren, half_w, 0, half_w, oh);
+			SDL_RenderDrawLine(P.ren, half_w, 0, half_w, half_h);
+			SDL_RenderDrawLine(P.ren, 0, half_h, ow, half_h);
+		} else {
+			int split = f->multiplayer == 1 && f->game2;
+			int half_w = split ? ow / 2 : ow;
+			float s = (float) half_w / EMU_W < (float) oh / EMU_H ? (float) half_w / EMU_W : (float) oh / EMU_H;
+			if (f->integer_scale && s >= 1.0f) s = (float) (int) s;
+			int dw = (int) (EMU_W * s), dh = (int) (EMU_H * s);
+			SDL_Rect d = {(half_w - dw) / 2, (oh - dh) / 2, dw, dh};
+			SDL_Texture* t = f->smooth ? P.tex_game_smooth : P.tex_game_sharp;
+			SDL_UpdateTexture(t, NULL, f->game, EMU_W * 4);
+			SDL_RenderCopy(P.ren, t, NULL, &d);
+			if (split) {
+				SDL_Rect d2 = {half_w + (half_w - dw) / 2, (oh - dh) / 2, dw, dh};
+				SDL_Texture* t2 = f->smooth ? P.tex_game2_smooth : P.tex_game2_sharp;
+				SDL_UpdateTexture(t2, NULL, f->game2, EMU_W * 4);
+				SDL_RenderCopy(P.ren, t2, NULL, &d2);
+				SDL_SetRenderDrawColor(P.ren, 70, 80, 112, 255);
+				SDL_RenderDrawLine(P.ren, half_w, 0, half_w, oh);
+			}
 		}
 	}
 	if (f->ui) {
@@ -574,7 +597,7 @@ static int pad_slot_for_instance(SDL_JoystickID id) {
 }
 static void send_pad_event(App* app, int type, int code, int value, SDL_JoystickID id) {
 	int player = pad_slot_for_instance(id);
-	if (player >= 0 && player < 2) send_player(app, type, code, value, player);
+	if (player >= 0 && player < 3) send_player(app, type, code, value, player);
 }
 
 static void mouse_to_ui(int wx, int wy, int* ux, int* uy) {
@@ -646,6 +669,8 @@ static void web_loop_cleanup(void) {
 	SDL_DestroyTexture(P.tex_game_smooth); P.tex_game_smooth = NULL;
 	SDL_DestroyTexture(P.tex_game2_sharp); P.tex_game2_sharp = NULL;
 	SDL_DestroyTexture(P.tex_game2_smooth); P.tex_game2_smooth = NULL;
+	SDL_DestroyTexture(P.tex_game3_sharp); P.tex_game3_sharp = NULL;
+	SDL_DestroyTexture(P.tex_game3_smooth); P.tex_game3_smooth = NULL;
 	SDL_DestroyRenderer(P.ren); P.ren = NULL;
 	SDL_DestroyWindow(P.win); P.win = NULL;
 	SDL_Quit();
@@ -895,10 +920,10 @@ int APP_ENTRY(int argc, char** argv) {
 	P.tex_game_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
 	P.tex_game2_sharp = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 0, SDL_BLENDMODE_NONE);
 	P.tex_game2_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
-	if (!P.tex_ui || !P.tex_game_sharp || !P.tex_game_smooth || !P.tex_game2_sharp || !P.tex_game2_smooth) {
-		debug_log_error("No se pudieron crear las texturas: %s (UI=%p GBAsharp=%p GBAsmooth=%p J2sharp=%p J2smooth=%p)", SDL_GetError(),
-		                (void*)P.tex_ui, (void*)P.tex_game_sharp, (void*)P.tex_game_smooth,
-		                (void*)P.tex_game2_sharp, (void*)P.tex_game2_smooth);
+	P.tex_game3_sharp = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 0, SDL_BLENDMODE_NONE);
+	P.tex_game3_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
+	if (!P.tex_ui || !P.tex_game_sharp || !P.tex_game_smooth || !P.tex_game2_sharp || !P.tex_game2_smooth || !P.tex_game3_sharp || !P.tex_game3_smooth) {
+		debug_log_error("No se pudieron crear las texturas de 3 jugadores: %s", SDL_GetError());
 		return 1;
 	}
 #if defined(__ORBIS__) || defined(PS4)
@@ -1085,6 +1110,7 @@ int APP_ENTRY(int argc, char** argv) {
 	if (P.audio) SDL_CloseAudioDevice(P.audio);
 	SDL_DestroyTexture(P.tex_ui); SDL_DestroyTexture(P.tex_game_sharp); SDL_DestroyTexture(P.tex_game_smooth);
 	SDL_DestroyTexture(P.tex_game2_sharp); SDL_DestroyTexture(P.tex_game2_smooth);
+	SDL_DestroyTexture(P.tex_game3_sharp); SDL_DestroyTexture(P.tex_game3_smooth);
 	SDL_DestroyRenderer(P.ren);
 	SDL_DestroyWindow(P.win);
 	SDL_Quit();
