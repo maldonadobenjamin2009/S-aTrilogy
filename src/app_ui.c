@@ -294,11 +294,12 @@ static void draw_header(App* a, Canvas* c) {
 
 static void draw_cards(App* a, Canvas* c) {
 	float pulse = 0.5f + 0.5f * sinf((float) a->now * 4.0f);
-	int order[NUM_GAMES] = {0, 1, 2};
-	for (int i = 0; i < NUM_GAMES; i++)
-		for (int j = i + 1; j < NUM_GAMES; j++)
+	/* Tres carátulas en la fila superior; Sonic Battle tiene su propia tarjeta abajo. */
+	int order[3] = {0, 1, 2};
+	for (int i = 0; i < 3; i++)
+		for (int j = i + 1; j < 3; j++)
 			if (a->anim[order[j]] < a->anim[order[i]]) { int t = order[i]; order[i] = order[j]; order[j] = t; }
-	for (int k = 0; k < NUM_GAMES; k++) {
+	for (int k = 0; k < 3; k++) {
 		int i = order[k];
 		float an = a->anim[i] < 0 ? 0 : (a->anim[i] > 1 ? 1 : a->anim[i]);
 		const GameInfo* g = &GAMES[i];
@@ -346,18 +347,32 @@ static int wrap_lines(const char* text, int size, int maxw, char lines[][256], i
 
 static void draw_battle_slot(App* a, Canvas* c) {
 	Rect r = ui_battle_slot_rect();
-	panel(c, r, ARGB(225, 7, 10, 24), 25, ARGB(100, 255, 181, 46), 2);
+	int selected = a->sel == 3 && a->zone == 0;
+	int has_rom = a->rom_found[3];
+	float pulse = 0.5f + 0.5f * sinf((float) a->now * 4.0f);
+	uint32_t accent = GAMES[3].accent;
+	panel(c, r, ARGB(225, 7, 10, 24), 25,
+	      with_alpha(selected ? accent : ARGB(100, 255, 181, 46),
+	                 selected ? (int) (190 + 60 * pulse) : 100),
+	      selected ? 5 : 2);
+	if (selected) gfx_rrect_stroke(c, rect_inflate(r, 12, 12), 30,
+	                               4, with_alpha(accent, (int) (120 + 80 * pulse)));
 	Rect art = rect_make(r.x + 16, r.y + 15, r.w - 32, 286);
 	gfx_rrect(c, rect_inflate(art, 5, 5), 16, ARGB(210, 0, 0, 0));
 	if (a->battle_slot) gfx_blit_scaled(c, a->battle_slot, art, 255);
 	else {
 		panel(c, art, ARGB(255, 12, 22, 48), 14, ARGB(170, 80, 150, 255), 2);
-		T(c, "SONIC BATTLE", art.x + art.w / 2, art.y + art.h / 2, 34, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+		T(c, "SONIC BATTLE", art.x + art.w / 2, art.y + art.h / 2,
+		  34, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
 	}
 	Rect foot = rect_make(r.x + 15, r.y + 307, r.w - 30, 47);
-	panel(c, foot, ARGB(235, 13, 17, 32), 14, ARGB(90, 255, 255, 255), 1);
-	T(c, "SONIC BATTLE  ·  ESPACIO RESERVADO",
-	  foot.x + foot.w / 2, foot.y + foot.h / 2, 20, RGB(255, 205, 75), TX_BOLD | TX_CENTER | TX_VMID);
+	panel(c, foot, ARGB(235, 13, 17, 32), 14,
+	      selected ? accent : ARGB(90, 255, 255, 255), selected ? 2 : 1);
+	T(c, "SONIC BATTLE", foot.x + 18, foot.y + foot.h / 2, 22,
+	  selected ? C_WHITE : RGB(255, 205, 75), TX_BOLD | TX_VMID);
+	T(c, has_rom ? "ROM LISTA" : "FALTA ROM",
+	  foot.x + foot.w - 18, foot.y + foot.h / 2, 17,
+	  has_rom ? C_GREEN : C_RED, TX_BOLD | TX_RIGHT | TX_VMID);
 }
 
 static void draw_detail(App* a, Canvas* c) {
