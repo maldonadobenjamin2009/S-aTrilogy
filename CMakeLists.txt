@@ -61,9 +61,10 @@ if(WIN32)
   target_compile_definitions(emu_core PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64)
   target_link_libraries(emu_core PUBLIC ws2_32 shlwapi)
 elseif(EMSCRIPTEN)
-  # El build web no usa pthreads: GitHub Pages no configura SharedArrayBuffer.
-  # El multijugador por cable link se mantiene fuera del port de navegador.
-  target_compile_definitions(emu_core PRIVATE _GNU_SOURCE HAVE_LOCALE)
+  # La pareja de mGBA usa pthreads en el navegador. GitHub Pages añade COOP/COEP
+  # mediante coi-serviceworker.js para habilitar SharedArrayBuffer en Chrome.
+  target_compile_definitions(emu_core PRIVATE USE_PTHREADS _GNU_SOURCE HAVE_LOCALE)
+  target_compile_options(emu_core PRIVATE -pthread)
 elseif(APPLE)
   target_compile_definitions(emu_core PRIVATE USE_PTHREADS _DARWIN_C_SOURCE HAVE_LOCALE HAVE_XLOCALE HAVE_SNPRINTF_L HAVE_STRTOF_L)
   find_package(Threads REQUIRED)
@@ -140,12 +141,15 @@ if(EMSCRIPTEN)
   add_executable(SonicAdvanceTrilogy src/main_sdl.c)
   # --use-port=sdl2 proporciona tanto las cabeceras como la implementación SDL para navegador.
   # -O3 + LTO para optimizar el núcleo C de mGBA y el renderizador por software.
-  target_compile_options(SonicAdvanceTrilogy PRIVATE --use-port=sdl2 -O3 -flto)
-  target_compile_options(emu_core PRIVATE -O3 -flto)
-  target_compile_options(launcher_core PRIVATE -O3 -flto)
+  target_compile_options(SonicAdvanceTrilogy PRIVATE --use-port=sdl2 -pthread -O3 -flto)
+  target_compile_options(emu_core PRIVATE -pthread -O3 -flto)
+  target_compile_options(launcher_core PRIVATE -pthread -O3 -flto)
   target_link_libraries(SonicAdvanceTrilogy PRIVATE launcher_core)
   target_link_options(SonicAdvanceTrilogy PRIVATE
     -O3 -flto
+    -pthread
+    "-sPTHREAD_POOL_SIZE=2"
+    "-sPTHREAD_POOL_SIZE_STRICT=2"
     --use-port=sdl2
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
     "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/dist/assets@/assets"

@@ -55,14 +55,12 @@ struct Emu {
 	/* Solo se usa en modo enlazado. La instancia primaria es propietaria del peer. */
 	struct Emu* peer;
 	struct LinkSession* link;
-#if !defined(__EMSCRIPTEN__)
 	struct mCoreThread thread;
 	struct mLockstepThreadUser lockstepUser;
 	struct GBASIOLockstepDriver linkDriver;
 	int playerId;
 	int threadStarted;
 	int driverAttached;
-#endif
 };
 
 struct LinkSession {
@@ -147,7 +145,6 @@ static void emu_pace_linked_core(Emu* emu) {
 	}
 }
 
-#if !defined(__EMSCRIPTEN__)
 static void linked_frame_callback(struct mCoreThread* thread) {
 	Emu* emu = thread ? (Emu*) thread->userData : NULL;
 	if (!emu || !emu->core) return;
@@ -175,7 +172,7 @@ static void linked_frame_callback(struct mCoreThread* thread) {
 	}
 	emu_pace_linked_core(emu);
 }
-#endif /* !__EMSCRIPTEN__: el callback usa el frontend de hilos de mGBA */
+
 
 static Emu* emu_open_internal(const char* rom_path, const char* save_path,
                               const char* bios_path, unsigned out_rate, int reset_now) {
@@ -248,7 +245,6 @@ Emu* emu_open(const char* rom_path, const char* save_path, const char* bios_path
 	return emu_open_internal(rom_path, save_path, bios_path, out_rate, 1);
 }
 
-#if !defined(__EMSCRIPTEN__)
 static void safe_lockstep_sleep(struct mLockstepUser* user) {
 	struct mLockstepThreadUser* tu = (struct mLockstepThreadUser*) user;
 	if (tu->thread && tu->thread->impl) mCoreThreadWaitFromThread(tu->thread);
@@ -262,7 +258,6 @@ static int link_requested_id(struct mLockstepUser* user) {
 	Emu* emu = tu->thread ? (Emu*) tu->thread->userData : NULL;
 	return emu ? emu->playerId : -1;
 }
-#endif
 static void emu_process_audio(Emu* emu) {
 	if (!emu || !emu->core || !emu->audioReady) return;
 	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
@@ -275,7 +270,6 @@ static void emu_process_audio(Emu* emu) {
 	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
 }
 
-#if !defined(__EMSCRIPTEN__)
 static void close_linked(Emu* primary) {
 	if (!primary) return;
 	Emu* secondary = primary->peer;
@@ -333,18 +327,6 @@ static void close_linked(Emu* primary) {
 	if (primary->frameMutexReady) MutexDeinit(&primary->frameMutex);
 	free(primary);
 }
-#endif
-
-#if defined(__EMSCRIPTEN__)
-Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
-                          const char* save_path2, const char* bios_path,
-                          unsigned out_rate, Emu** secondary_out) {
-	(void) save_path2;
-	if (secondary_out) *secondary_out = NULL;
-	debug_log_warn("Este port web se compila sin hilos; se iniciará solo el jugador 1.");
-	return emu_open(rom_path, save_path, bios_path, out_rate);
-}
-#else
 Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
                           const char* save_path2, const char* bios_path,
                           unsigned out_rate, Emu** secondary_out) {
@@ -425,14 +407,12 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
 	debug_log_info("Cable link listo: J1 izquierda, J2 derecha; pacing de vídeo independiente; audio de J1 prioritario");
 	return first;
 }
-#endif /* __EMSCRIPTEN__ */
+
 
 void emu_close(Emu* emu) {
 	if (!emu) return;
 	if (emu->peer) {
-#if !defined(__EMSCRIPTEN__)
 		close_linked(emu);
-#endif
 		return;
 	}
 	/* La instancia secundaria es propietaria del enlace solo de manera no dueña.
@@ -456,17 +436,9 @@ void emu_close(Emu* emu) {
 }
 
 void emu_set_paused(Emu* emu, int paused) {
-#if defined(__EMSCRIPTEN__)
-	/* La build web ejecuta core->runFrame desde app_update; ST_PAUSE ya detiene los frames. */
-	(void) emu;
-	(void) paused;
-#else
-
 	if (!emu || !emu->peer || !emu->link || !emu->thread.impl || !emu->peer->thread.impl) return;
 	Emu* second = emu->peer;
 	if (paused) {
-		/* Pedir primero ambas pausas de forma asíncrona y luego esperar por cada
-		 * worker. Así uno no puede seguir varios fotogramas mientras el otro se pausa. */
 		mCoreThreadPauseFromThread(&emu->thread);
 		mCoreThreadPauseFromThread(&second->thread);
 		mCoreThreadPause(&emu->thread);
@@ -475,23 +447,17 @@ void emu_set_paused(Emu* emu, int paused) {
 		mCoreThreadUnpause(&emu->thread);
 		mCoreThreadUnpause(&second->thread);
 	}
-#endif
 }
+
 void emu_reset(Emu* emu) {
 	if (!emu) return;
 	int linked = emu->peer && emu->link;
-#if !defined(__EMSCRIPTEN__)
 	if (linked) {
 		mCoreThreadReset(&emu->thread);
 		mCoreThreadReset(&emu->peer->thread);
 	} else {
 		emu->core->reset(emu->core);
 	}
-#else
-	/* El port de navegador es monohilo y nunca construye una pareja link. */
-	(void) linked;
-	emu->core->reset(emu->core);
-#endif
 	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
 	mAudioBufferClear(&emu->out);
 	/* En pareja el buffer fuente pertenece al worker: no tocarlo desde el hilo UI. */
@@ -510,7 +476,6 @@ void emu_set_keys(Emu* emu, uint32_t keys) {
 
 void emu_run_frame(Emu* emu) {
 	if (!emu || !emu->core) return;
-#if !defined(__EMSCRIPTEN__)
 	if (emu->peer && emu->link) {
 		Emu* second = emu->peer;
 		/* Poll no bloqueante: el callback de cada hilo ya actualizó su snapshot
@@ -528,7 +493,6 @@ void emu_run_frame(Emu* emu) {
 		}
 		return;
 	}
-#endif
 	emu->core->runFrame(emu->core);
 	memcpy(emu->videoSnapshot, emu->video, sizeof(emu->videoSnapshot));
 	emu_process_audio(emu);

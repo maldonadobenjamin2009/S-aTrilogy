@@ -85,7 +85,69 @@
       }
     };
   </script>
-  {{{ SCRIPT }}}
+  <template id="emscripten-script">{{{ SCRIPT }}}</template>
   <script src="launcher.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      const status = document.getElementById('status');
+      const overlayText = document.querySelector('#screen-overlay p');
+      const reloadKey = 'sat-coi-reload-attempted';
+
+      function setMessage(message) {
+        if (status) {
+          status.textContent = message;
+          status.classList.add('error');
+        }
+        if (overlayText) overlayText.textContent = message;
+      }
+
+      function loadWasmRuntime() {
+        const template = document.getElementById('emscripten-script');
+        const original = template && template.content.querySelector('script[src]');
+        if (!original) {
+          setMessage('No se encontró el cargador WebAssembly generado por Emscripten.');
+          return;
+        }
+        const script = document.createElement('script');
+        script.src = original.getAttribute('src');
+        script.async = true;
+        script.onerror = function () {
+          setMessage('No se pudo descargar el runtime WebAssembly. Revisá la publicación de GitHub Pages.');
+        };
+        document.head.appendChild(script);
+      }
+
+      if (window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined') {
+        sessionStorage.removeItem(reloadKey);
+        loadWasmRuntime();
+        return;
+      }
+
+      if (!('serviceWorker' in navigator)) {
+        setMessage('Chrome no permite activar el aislamiento necesario para el multijugador web en este contexto. Abrí la página publicada por HTTPS.');
+        return;
+      }
+
+      if (sessionStorage.getItem(reloadKey) === '1') {
+        setMessage('No se pudo habilitar SharedArrayBuffer. Comprobá que el service worker esté permitido para este sitio.');
+        return;
+      }
+      setMessage('Preparando el modo multijugador de Chrome. La página se recargará una vez para habilitarlo…');
+      sessionStorage.setItem(reloadKey, '1');
+
+      navigator.serviceWorker.register('./coi-serviceworker.js', { scope: './' }).then(function () {
+        function reloadWhenControlled() {
+          if (navigator.serviceWorker.controller) window.location.reload();
+        }
+        if (navigator.serviceWorker.controller) window.location.reload();
+        else navigator.serviceWorker.addEventListener('controllerchange', reloadWhenControlled, { once: true });
+      }).catch(function (error) {
+        console.error('[S-aTrilogy] No se pudo registrar el service worker COI', error);
+        sessionStorage.removeItem(reloadKey);
+        setMessage('No se pudo preparar el aislamiento de Chrome: ' + (error && error.message ? error.message : error));
+      });
+    })();
+  </script>
 </body>
 </html>

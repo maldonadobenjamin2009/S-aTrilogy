@@ -53,7 +53,11 @@ jobs:
           set -euo pipefail
           mkdir -p site site/licencias
           install -m 0644 build-web/index.html build-web/index.js build-web/index.wasm build-web/index.data site/
-          install -m 0644 web/launcher.js web/styles.css site/
+          install -m 0644 web/launcher.js web/styles.css web/coi-serviceworker.js site/
+          # Incluye todos los artefactos auxiliares que el SDK Emscripten pueda generar.
+          for file in build-web/index.*; do
+            [[ -f "$file" ]] && install -m 0644 "$file" site/
+          done
           install -m 0644 third_party/mgba/LICENSE site/licencias/mGBA-LICENSE-MPL-2.0.txt
           install -m 0644 third_party/DejaVu-LICENSE.txt site/licencias/DejaVu-LICENSE.txt
           touch site/.nojekyll
