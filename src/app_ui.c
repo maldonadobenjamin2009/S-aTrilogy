@@ -103,9 +103,9 @@ static Canvas* make_battle_placeholder(int w, int h) {
 	gfx_ring(c, w * 0.83f, h * 0.45f, h * 0.28f, 7, RGB(255, 181, 46));
 	gfx_line(c, w * 0.58f, 0, w * 0.43f, h, 5, ARGB(70, 255, 255, 255));
 	gfx_line(c, w * 0.69f, 0, w * 0.54f, h, 2, ARGB(45, 255, 255, 255));
-	gfx_text(c, "SONIC BATTLE", (int) (w * 0.055f), (int) (h * 0.28f), (int) (h * 0.16f), C_WHITE, TX_BOLD);
-	gfx_text(c, "ESPACIO RESERVADO", (int) (w * 0.06f), (int) (h * 0.52f), (int) (h * 0.075f), RGB(255, 198, 65), TX_BOLD);
-	gfx_text(c, "assets/games/sonicbattle.png", (int) (w * 0.06f), h - (int) (h * 0.11f), (int) (h * 0.055f), RGB(200, 211, 235), 0);
+	/* El título y la etiqueta se dibujan en la franja inferior de la tarjeta,
+	 * dejando la ilustración de reserva limpia y sin texto duplicado. */
+	gfx_circle(c, w * 0.20f, h * 0.92f, h * 0.12f, ARGB(24, 255, 205, 65));
 	return c;
 }
 
