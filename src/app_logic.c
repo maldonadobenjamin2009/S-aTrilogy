@@ -315,7 +315,7 @@ static void start_game_now(App* a, int i, int multiplayer) {
 
 static void start_game(App* a, int i) {
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
-#if !defined(__EMSCRIPTEN__)
+	/* El selector 1J/2J es compartido por todas las plataformas, incluida WebAssembly. */
 	a->modal = 1;
 	a->modal_kind = 1;
 	a->modal_choice = 0;
@@ -328,9 +328,6 @@ static void start_game(App* a, int i) {
 	                ? "J1 usa el mando detectado y J2 el teclado: flechas, A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter."
 	                : "Sin mandos: J1 WASD (A=X, B=Z, Select=1, Start=2); J2 flechas (A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter)."));
 	return;
-#else
-	start_game_now(a, i, 0);
-#endif
 }
 
 static void resolve_game_mode(App* a, int two_players) {
@@ -515,13 +512,9 @@ static void controls_action(App* a, int act) {
 	else if (act == A_DOWN) a->ctrl_row = (a->ctrl_row + 1) % n;
 	else if (act == A_LEFT || act == A_RIGHT) {
 		if (a->ctrl_row < ACT_COUNT) {
-#if defined(__EMSCRIPTEN__)
-			a->ctrl_col = act == A_LEFT ? 0 : 1;
-#else
 			a->ctrl_col += act == A_LEFT ? -1 : 1;
 			if (a->ctrl_col < 0) a->ctrl_col = 2;
 			if (a->ctrl_col > 2) a->ctrl_col = 0;
-#endif
 		}
 	}
 	else if (act == A_BACK || act == A_MENU) leave_controls(a);
@@ -795,11 +788,7 @@ static void mouse_move(App* a, int x, int y) {
 			for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) {
 				a->ctrl_row = k;
 				if (k < ACT_COUNT) {
-					#if defined(__EMSCRIPTEN__)
-					for (int col = 0; col < 2; col++)
-#else
-					for (int col = 0; col < 3; col++)
-#endif
+										for (int col = 0; col < 3; col++)
 						if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
 				}
 			}

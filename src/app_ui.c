@@ -32,13 +32,9 @@ static Rect controls_panel(void) { return rect_make(160, 40, 1600, 1000); }
 Rect ui_ctrl_row_rect(int k) { Rect p = controls_panel(); return rect_make(p.x + 40, p.y + 150 + k * 47, p.w - 80, 43); }
 Rect ui_ctrl_cell_rect(int k, int col) {
 	Rect r = ui_ctrl_row_rect(k);
-#if defined(__EMSCRIPTEN__)
-	return rect_make(r.x + (col == 0 ? 540 : 1030), r.y, 470, r.h);
-#else
 	static const int offsets[3] = {350, 740, 1130};
 	if (col < 0 || col > 2) col = 0;
 	return rect_make(r.x + offsets[col], r.y, 350, r.h);
-#endif
 }
 Rect ui_pause_rect(int i) { return rect_make(100, 200 + i * 98, 660, 82); }
 Rect ui_slot_rect(int n) { return rect_make(100 + (n % 4) * 440, 200 + (n / 4) * 395, 400, 365); }
@@ -402,57 +398,7 @@ static void draw_settings(App* a, Canvas* c) {
 
 static uint32_t cur_accent(const App* a) { return GAMES[a->emu ? a->game_idx : a->sel].accent; }
 
-#if defined(__EMSCRIPTEN__)
-/* La web conserva su panel de dos columnas; la edición por jugador es nativa. */
-static void draw_controls(App* a, Canvas* c) {
-	veil(c, 185);
-	Rect p = controls_panel();
-	uint32_t acc = cur_accent(a);
-	panel(c, p, ARGB(250, 14, 17, 32), 28, ARGB(60, 255, 255, 255), 2);
-	T(c, "CONTROLES", p.x + 50, p.y + 28, 50, C_WHITE, TX_BOLD);
-	Rect r0 = ui_ctrl_row_rect(0);
-	T(c, "ACCIÓN", r0.x + 20, p.y + 112, 20, C_MUTED, TX_BOLD);
-	T(c, "TECLADO", r0.x + 540 + 20, p.y + 112, 20, C_MUTED, TX_BOLD);
-	T(c, "MANDO (PS4)", r0.x + 1030 + 20, p.y + 112, 20, C_MUTED, TX_BOLD);
-	float pulse = 0.5f + 0.5f * sinf((float) a->now * 6.0f);
-	for (int k = 0; k < ACT_COUNT + 2; k++) {
-		Rect r = ui_ctrl_row_rect(k);
-		int focused = k == a->ctrl_row;
-		if (k < ACT_COUNT) {
-			panel(c, r, focused ? with_alpha(acc, 60) : ARGB(14, 255, 255, 255), 10, 0, 0);
-			T(c, action_label[k], r.x + 20, r.y + r.h / 2, 26, focused ? C_WHITE : C_SOFT, TX_VMID | (focused ? TX_BOLD : 0));
-			for (int col = 0; col < 2; col++) {
-				Rect cell = ui_ctrl_cell_rect(k, col);
-				int sel = focused && a->ctrl_col == col;
-				int waiting = a->capture_kind >= 0 && sel;
-				int code = col == 0 ? a->cfg.keys[k] : a->cfg.pad[0][k];
-				if (waiting) {
-					panel(c, cell, ARGB((int) (70 + 70 * pulse), 255, 205, 60), 10, C_GOLD, 3);
-					T(c, col == 0 ? "Pulsa una tecla…" : "Pulsa un botón…", cell.x + cell.w / 2, cell.y + cell.h / 2, 24, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
-				} else {
-					panel(c, cell, ARGB(90, 0, 0, 0), 10, sel ? acc : ARGB(40, 255, 255, 255), sel ? 3 : 1);
-					char buf[64];
-					if (col == 0) key_label(a, code, buf, sizeof(buf)); else pad_label(code, buf, sizeof(buf));
-					T(c, buf, cell.x + cell.w / 2, cell.y + cell.h / 2, 24, code >= 0 ? C_WHITE : C_MUTED, TX_CENTER | TX_VMID | (sel ? TX_BOLD : 0));
-				}
-			}
-		} else {
-			panel(c, r, focused ? with_alpha(acc, 110) : ARGB(18, 255, 255, 255), 10, focused ? acc : 0, 3);
-			T(c, k == ACT_COUNT ? "Restablecer controles por defecto" : "Volver", r.x + r.w / 2, r.y + r.h / 2, 26, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
-		}
-	}
-	if (a->capture_kind >= 0) {
-		Hint h[2] = {{GL_CIRCLE, "Esc", "Cancelar"}, {GL_SQUARE, "Supr", "Borrar"}};
-		draw_hints(a, c, h, 2, p.x + p.w - 40, p.y + p.h - 50);
-	} else {
-		Hint h[4] = {{GL_DPAD, "↑ ↓ ← →", "Mover"}, {GL_CROSS, "Enter", "Reasignar"}, {GL_SQUARE, "Supr", "Borrar"}, {GL_CIRCLE, "Esc", "Volver"}};
-		draw_hints(a, c, h, 4, p.x + p.w - 40, p.y + p.h - 50);
-	}
-}
 
-
-#else
-static void draw_controls(App* a, Canvas* c) {
 	veil(c, 185);
 	Rect p = controls_panel();
 	uint32_t acc = cur_accent(a);
@@ -503,7 +449,6 @@ static void draw_controls(App* a, Canvas* c) {
 }
 
 
-#endif
 
 static void draw_modal(App* a, Canvas* c) {
 	veil(c, 200);
