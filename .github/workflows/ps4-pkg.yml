@@ -26,7 +26,7 @@ jobs:
         run: |
           set -euo pipefail
           apt-get update
-          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates curl tar golang-go
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends git git-lfs ca-certificates curl tar golang-go file
           git lfs install --system
 
       - name: Checkout source and tracked ROM/assets (Git LFS)
@@ -61,6 +61,7 @@ jobs:
             curl -fsSL --retry 3 --retry-delay 2 "$SAMPLE_BASE/$rel" -o "$SAMPLE_DIR/$rel"
             test -s "$SAMPLE_DIR/$rel" || { echo "::error::OpenOrbis sample file is empty: $rel"; exit 1; }
           done
+          export OO_PS4_SAMPLE_DIR="$SAMPLE_DIR"
           echo "OO_PS4_SAMPLE_DIR=$SAMPLE_DIR" >> "$GITHUB_ENV"
           echo "Pinned OpenOrbis Piglet package inputs:"
           sha256sum "$SAMPLE_DIR/sce_sys/about/right.sprx" "$SAMPLE_DIR/sce_module/libc.prx" "$SAMPLE_DIR/sce_module/libSceFios2.prx"
