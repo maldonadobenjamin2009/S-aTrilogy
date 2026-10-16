@@ -127,5 +127,6 @@ Rect ui_slot_rect(int n);
 Rect ui_modal_ok(void);
 Rect ui_modal_yes(void);
 Rect ui_modal_no(void);
+Rect ui_modal_mode_rect(int mode);
 
 #endif

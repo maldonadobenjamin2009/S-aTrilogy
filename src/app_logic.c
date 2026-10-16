@@ -151,6 +151,9 @@ static void clear_inputs(App* a) {
 	a->p2_npad = a->p2_nstick = 0;
 	a->p2_trig[0] = a->p2_trig[1] = 0;
 	a->p2_stick[0] = a->p2_stick[1] = 0.0f;
+	a->p3_npad = a->p3_nstick = 0;
+	a->p3_trig[0] = a->p3_trig[1] = 0;
+	a->p3_stick[0] = a->p3_stick[1] = 0.0f;
 	memset(a->touch_down, 0, sizeof(a->touch_down));
 	for (int i = 0; i < 4; i++) a->held_dir[i] = 0;
 	a->stick_dir = -1;
@@ -286,7 +289,7 @@ static void activate_game(App* a, int i) {
 	a->audio_fill_avg = 0.0;
 	s_logged_first_audio_chunk = 0;
 	debug_log_info("Juego iniciado: %s; modo=%s; volumen=%d%%; frecuencia de salida=%d Hz",
-	               GAMES[i].title, a->emu2 ? "dos jugadores" : "un jugador",
+	               GAMES[i].title, a->emu3 ? "tres jugadores" : (a->emu2 ? "dos jugadores" : "un jugador"),
 	               a->cfg.volume, a->host.audio_rate);
 	a->have_frame = 0;
 	a->audio_frames = 0;
@@ -297,23 +300,31 @@ static void activate_game(App* a, int i) {
 	set_cursor(a);
 	char title[160];
 	snprintf(title, sizeof(title), "%s%s - Sonic Advance Trilogy", GAMES[i].title,
-	         a->emu2 ? " [2 jugadores]" : "");
+	         a->emu3 ? " [3 jugadores]" : (a->emu2 ? " [2 jugadores]" : ""));
 	if (a->host.set_title) a->host.set_title(a->host.user, title);
-	if (a->emu2) app_toast(a, "Pantalla dividida: J1 izquierda · J2 derecha");
+	if (a->emu3) app_toast(a, "Sonic Battle: J1/J2 arriba · J3 abajo");
+	else if (a->emu2) app_toast(a, "Pantalla dividida: J1 izquierda · J2 derecha");
 }
 
 #if defined(__EMSCRIPTEN__)
 static void* web_link_launch_worker(void* arg) {
 	App* a = (App*) arg;
 	Emu* second = NULL;
-	Emu* first = emu_open_linked_pair(
-		a->web_launch_rom, a->web_launch_save, a->web_launch_save2,
-		a->web_launch_bios[0] ? a->web_launch_bios : NULL,
-		a->web_launch_audio_rate, &second);
+	Emu* third = NULL;
+	Emu* first;
+	if (a->web_launch_players >= 3) {
+		first = emu_open_linked_trio(a->web_launch_rom, a->web_launch_save, a->web_launch_save2,
+		                              a->web_launch_save3, a->web_launch_bios[0] ? a->web_launch_bios : NULL,
+		                              a->web_launch_audio_rate, &second, &third);
+	} else {
+		first = emu_open_linked_pair(a->web_launch_rom, a->web_launch_save, a->web_launch_save2,
+		                             a->web_launch_bios[0] ? a->web_launch_bios : NULL,
+		                             a->web_launch_audio_rate, &second);
+	}
 	a->web_launch_emu = first;
 	a->web_launch_emu2 = second;
+	a->web_launch_emu3 = third;
 	a->web_launch_ok = first != NULL;
-	/* Publica los dos punteros y el estado solo después de terminar la inicialización. */
 	atomic_store_explicit(&a->web_launch_done, 1, memory_order_release);
 	return NULL;
 }
@@ -336,8 +347,10 @@ static void poll_web_link_launch(App* a) {
 	if (!a->web_launch_ok || !a->web_launch_emu) {
 		a->emu = NULL;
 		a->emu2 = NULL;
+		a->emu3 = NULL;
 		a->web_launch_emu = NULL;
 		a->web_launch_emu2 = NULL;
+		a->web_launch_emu3 = NULL;
 		debug_log_error("No se pudo iniciar %s en modo multijugador web", GAMES[game].title);
 		app_modal(a, "No se pudo iniciar el juego",
 		          "mGBA no pudo crear la conexión por cable link. Comprueba la ROM y que Chrome permita los trabajadores WebAssembly.");
@@ -345,37 +358,37 @@ static void poll_web_link_launch(App* a) {
 	}
 	a->emu = a->web_launch_emu;
 	a->emu2 = a->web_launch_emu2;
+	a->emu3 = a->web_launch_emu3;
 	a->web_launch_emu = NULL;
 	a->web_launch_emu2 = NULL;
+	a->web_launch_emu3 = NULL;
 	activate_game(a, game);
 }
 #endif
 
-static void start_game_now(App* a, int i, int multiplayer) {
-	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
+static void start_game_now(App* a, int i, int players) {
+	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24], save3[PATH_MAX_APP + 24];
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
+	if (players < 1) players = 1;
+	if (players > 2 && i != 3) players = 2;
 	sys_mkdir_p(a->saves_dir);
 	sys_stem(a->rom_path[i], stem, sizeof(stem));
 	snprintf(save, sizeof(save), "%s/%s.sav", a->saves_dir, stem);
 	snprintf(save2, sizeof(save2), "%s/%s.p2.sav", a->saves_dir, stem);
-	a->emu = NULL;
-	a->emu2 = NULL;
-
+	snprintf(save3, sizeof(save3), "%s/%s.p3.sav", a->saves_dir, stem);
+	a->emu = a->emu2 = a->emu3 = NULL;
 #if defined(__EMSCRIPTEN__)
-	if (multiplayer) {
-		/* mCoreThreadStart espera a que cada núcleo pase a RUNNING. Hacerlo dentro
-		 * del evento de clic bloqueaba el event loop de Chrome durante el handshake.
-		 * Un trabajador temporal coordina el arranque; los dos hilos GBA quedan en
-		 * sus propios workers y la interfaz sigue repintándose mientras tanto. */
+	if (players > 1) {
 		snprintf(a->web_launch_rom, sizeof(a->web_launch_rom), "%s", a->rom_path[i]);
 		snprintf(a->web_launch_save, sizeof(a->web_launch_save), "%s", save);
 		snprintf(a->web_launch_save2, sizeof(a->web_launch_save2), "%s", save2);
-		if (sys_file_exists(a->bios_file))
-			snprintf(a->web_launch_bios, sizeof(a->web_launch_bios), "%s", a->bios_file);
+		snprintf(a->web_launch_save3, sizeof(a->web_launch_save3), "%s", save3);
+		if (sys_file_exists(a->bios_file)) snprintf(a->web_launch_bios, sizeof(a->web_launch_bios), "%s", a->bios_file);
 		else a->web_launch_bios[0] = 0;
 		a->web_launch_audio_rate = a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u;
 		a->web_launch_game = i;
-		a->web_launch_emu = a->web_launch_emu2 = NULL;
+		a->web_launch_players = players;
+		a->web_launch_emu = a->web_launch_emu2 = a->web_launch_emu3 = NULL;
 		a->web_launch_ok = 0;
 		atomic_store_explicit(&a->web_launch_done, 0, memory_order_relaxed);
 		a->web_launch_active = 1;
@@ -383,34 +396,24 @@ static void start_game_now(App* a, int i, int multiplayer) {
 		a->loading = 1;
 		int err = pthread_create(&a->web_launch_thread, NULL, web_link_launch_worker, a);
 		if (err != 0) {
-			a->web_launch_active = 0;
-			a->pending_launch = -1;
-			a->loading = 0;
+			a->web_launch_active = 0; a->pending_launch = -1; a->loading = 0;
 			debug_log_error("No se pudo crear el trabajador de arranque web (pthread_create=%d)", err);
-			app_modal(a, "No se pudo iniciar el juego",
-			          "Chrome no pudo reservar un trabajador para iniciar el multijugador. Recarga la página y vuelve a intentarlo.");
-		} else {
-			debug_log_info("Web 2J: inicialización de mGBA delegada a un trabajador; la interfaz permanece activa");
-		}
+			app_modal(a, "No se pudo iniciar el juego", "Chrome no pudo reservar trabajadores para el modo local. Recarga la página y vuelve a intentarlo.");
+		} else debug_log_info("Web: inicio de mGBA delegado al trabajador (%d jugadores)", players);
 		return;
 	}
 #endif
-
-	if (multiplayer) {
-		a->emu = emu_open_linked_pair(a->rom_path[i], save, save2,
-		                             sys_file_exists(a->bios_file) ? a->bios_file : NULL,
-		                             a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u,
-		                             &a->emu2);
-	} else {
-		a->emu = emu_open(a->rom_path[i], save, sys_file_exists(a->bios_file) ? a->bios_file : NULL,
-		                  a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u);
-	}
+	const char* bios = sys_file_exists(a->bios_file) ? a->bios_file : NULL;
+	unsigned rate = a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u;
+	if (players >= 3) a->emu = emu_open_linked_trio(a->rom_path[i], save, save2, save3, bios, rate, &a->emu2, &a->emu3);
+	else if (players == 2) a->emu = emu_open_linked_pair(a->rom_path[i], save, save2, bios, rate, &a->emu2);
+	else a->emu = emu_open(a->rom_path[i], save, bios, rate);
 	if (!a->emu) {
-		a->emu2 = NULL;
-		debug_log_error("No se pudo iniciar %s en modo %s", GAMES[i].title, multiplayer ? "multijugador" : "un jugador");
-		app_modal(a, "No se pudo iniciar el juego", multiplayer
-		          ? "mGBA no pudo crear la conexión por cable link. Comprueba que la ROM de GBA sea válida."
-		          : "mGBA no pudo abrir la ROM. Comprueba que es una ROM de GBA válida (.gba sin comprimir).");
+		a->emu2 = a->emu3 = NULL;
+		debug_log_error("No se pudo iniciar %s en modo de %d jugadores", GAMES[i].title, players);
+		app_modal(a, "No se pudo iniciar el juego", players > 1
+		          ? "mGBA no pudo crear la sesión de cable link. Comprueba que la ROM de GBA sea válida."
+		          : "mGBA no pudo abrir la ROM. Comprueba que sea una ROM de GBA válida (.gba sin comprimir).");
 		return;
 	}
 	activate_game(a, i);
@@ -418,29 +421,27 @@ static void start_game_now(App* a, int i, int multiplayer) {
 
 static void start_game(App* a, int i) {
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
-	/* El selector 1J/2J es compartido por todas las plataformas, incluida WebAssembly. */
-	a->modal = 1;
-	a->modal_kind = 1;
-	a->modal_choice = 0;
-	a->prompt_game = i;
-	snprintf(a->modal_title, sizeof(a->modal_title), "¿CÓMO DESEA JUGAR?");
-	snprintf(a->modal_text, sizeof(a->modal_text),
-	         a->pad_count >= 2
-	           ? "Se usarán los mandos J1 y J2, configurables por separado en Ajustes > Controles."
-	           : (a->pad_count == 1
-	                ? "J1 usa el mando detectado y J2 el teclado: flechas, A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter."
-	                : "Sin mandos: J1 WASD (A=X, B=Z, Select=1, Start=2); J2 flechas (A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter)."));
-	return;
+	a->modal = 1; a->modal_kind = 1; a->modal_choice = 0; a->prompt_game = i;
+	snprintf(a->modal_title, sizeof(a->modal_title), i == 3 ? "¿CUÁNTOS JUGADORES?" : "¿CÓMO DESEA JUGAR?");
+	if (i == 3) {
+		snprintf(a->modal_text, sizeof(a->modal_text),
+		         "Sonic Battle permite partidas locales con 1, 2 o 3 jugadores. J3 usa IJKL, N/M para A/B, U/O para L/R, P=Start y H=Select. También puedes conectar tres mandos.");
+	} else {
+		snprintf(a->modal_text, sizeof(a->modal_text),
+		         a->pad_count >= 2 ? "Se usarán los mandos J1 y J2, configurables por separado en Ajustes > Controles."
+		           : (a->pad_count == 1
+		                ? "J1 usa el mando detectado y J2 el teclado: flechas, A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter."
+		                : "Sin mandos: J1 WASD (A=X, B=Z, Select=1, Start=2); J2 flechas (A=Ctrl derecho, B=AltGr, Select=Shift derecho, Start=Enter)."));
+	}
 }
 
-static void resolve_game_mode(App* a, int two_players) {
+static void resolve_game_mode(App* a, int players) {
 	int game = a->prompt_game;
-	a->modal = 0;
-	a->modal_kind = 0;
+	a->modal = 0; a->modal_kind = 0;
 	if (game < 0 || game >= NUM_GAMES) return;
-	/* El modo 2J enlaza dos núcleos mGBA incluso sin mandos; las teclas de ambos
-	 * jugadores se transforman en máscaras de entrada independientes. */
-	start_game_now(a, game, two_players != 0);
+	if (players < 1) players = 1;
+	if (players > 2 && game != 3) players = 2;
+	start_game_now(a, game, players);
 }
 
 static void pause_game(App* a) {
@@ -450,6 +451,7 @@ static void pause_game(App* a) {
 	for (int i = 0; i < PAUSE_COUNT; i++) a->pause_anim[i] = 0;
 	emu_set_keys(a->emu, 0);
 	if (a->emu2) emu_set_keys(a->emu2, 0);
+	if (a->emu3) emu_set_keys(a->emu3, 0);
 	emu_set_paused(a->emu, 1);
 	clear_inputs(a);
 	a->audio_frames = 0;
@@ -463,6 +465,7 @@ static void resume_game(App* a) {
 	clear_inputs(a);
 	emu_clear_audio(a->emu);
 	if (a->emu2) emu_clear_audio(a->emu2);
+	if (a->emu3) emu_clear_audio(a->emu3);
 	a->audio_frames = 0;
 	a->audio_reset = 1;
 	set_cursor(a);
@@ -470,22 +473,17 @@ static void resume_game(App* a) {
 
 static void restart_game(App* a) {
 	int game = a->game_idx;
-	int multiplayer = a->emu2 != NULL;
+	int players = a->emu3 ? 3 : (a->emu2 ? 2 : 1);
 	if (a->emu) emu_close(a->emu);
-	a->emu = NULL;
-	a->emu2 = NULL;
+	a->emu = a->emu2 = a->emu3 = NULL;
 	a->state = ST_MAIN;
-	start_game_now(a, game, multiplayer);
-	if (!a->emu) {
-		a->state = ST_MAIN;
-		set_cursor(a);
-	}
+	start_game_now(a, game, players);
+	if (!a->emu) { a->state = ST_MAIN; set_cursor(a); }
 }
 
 static void exit_game(App* a) {
 	if (a->emu) emu_close(a->emu);
-	a->emu = NULL;
-	a->emu2 = NULL;
+	a->emu = a->emu2 = a->emu3 = NULL;
 	a->have_frame = 0;
 	a->state = ST_MAIN;
 	for (int n = 1; n <= SLOT_COUNT; n++) { cv_free(a->slot_thumbs[n]); a->slot_thumbs[n] = NULL; }
@@ -506,13 +504,14 @@ static int pressed_id(const App* a, int id) {
  * J2: flechas, Ctrl derecho=A, Alt derecho/AltGr=B, Enter=Start,
  * Shift derecho=Select. Cada tabla está separada para permitir que teclado y
  * mando funcionen simultáneamente. */
-static const int dual_keyboard_keys[2][ACT_COUNT] = {
+static const int dual_keyboard_keys[3][ACT_COUNT] = {
 	{'x', 'z', 'q', 'e', '2', '1', 'w', 's', 'a', 'd', K_ESCAPE, K_TAB, K_F5, K_F8},
-	{K_RCTRL, K_RALT, -1, -1, K_RETURN, K_RSHIFT, K_UP, K_DOWN, K_LEFT, K_RIGHT, -1, -1, -1, -1}
+	{K_RCTRL, K_RALT, -1, -1, K_RETURN, K_RSHIFT, K_UP, K_DOWN, K_LEFT, K_RIGHT, -1, -1, -1, -1},
+	{'n', 'm', 'u', 'o', 'p', 'h', 'i', 'k', 'j', 'l', -1, -1, -1, -1}
 };
 static uint32_t dual_keyboard_mask(const App* a, int player) {
 	uint32_t m = 0;
-	if (player < 0 || player > 1) return 0;
+	if (player < 0 || player > 2) return 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		int k = dual_keyboard_keys[player][i];
 		if (GBA_BIT[i] >= 0 && k >= 0 && set_has(a->keys_down, a->nkeys, k)) m |= 1u << GBA_BIT[i];
@@ -537,11 +536,23 @@ static int pressed_id2(const App* a, int id) {
 	return (id == PAD_L2 && a->p2_trig[0]) || (id == PAD_R2 && a->p2_trig[1]);
 }
 static uint32_t keymask2(const App* a) {
-	/* Si solo hay un mando, J1 lo usa y el teclado queda disponible para J2. */
 	uint32_t m = (a->emu2 && a->pad_count < 2) ? dual_keyboard_mask(a, 1) : 0;
 	for (int i = 0; i < ACT_COUNT; i++) {
 		if (GBA_BIT[i] < 0) continue;
 		if (pressed_id2(a, a->cfg.pad[1][i])) m |= 1u << GBA_BIT[i];
+	}
+	return m;
+}
+static int pressed_id3(const App* a, int id) {
+	if (id < 0) return 0;
+	if (set_has(a->p3_pad_down, a->p3_npad, id) || set_has(a->p3_stick_down, a->p3_nstick, id)) return 1;
+	return (id == PAD_L2 && a->p3_trig[0]) || (id == PAD_R2 && a->p3_trig[1]);
+}
+static uint32_t keymask3(const App* a) {
+	uint32_t m = (a->emu3 && a->pad_count < 3) ? dual_keyboard_mask(a, 2) : 0;
+	for (int i = 0; i < ACT_COUNT; i++) {
+		if (GBA_BIT[i] < 0) continue;
+		if (pressed_id3(a, a->cfg.pad[1][i])) m |= 1u << GBA_BIT[i];
 	}
 	return m;
 }
@@ -814,6 +825,12 @@ static void on_pad_button(App* a, int id, int down, int player) {
 		}
 		return;
 	}
+	if (player == 2) {
+		if (a->state != ST_GAME || !a->emu3) return;
+		if (down) set_add(a->p3_pad_down, &a->p3_npad, id);
+		else set_del(a->p3_pad_down, &a->p3_npad, id);
+		return;
+	}
 	if (player == 1) {
 		/* J2 solo controla su núcleo durante una sesión enlazada. */
 		if (a->state != ST_GAME || !a->emu2) return;
@@ -858,6 +875,18 @@ static void on_pad_axis(App* a, int axis, int value, int player) {
 			a->capture_kind = -1;
 			return;
 		}
+	}
+	if (player == 2) {
+		if (a->state != ST_GAME || !a->emu3) return;
+		if (axis == 0 || axis == 1) {
+			a->p3_stick[axis] = v;
+			a->p3_nstick = 0;
+			if (a->p3_stick[0] < -0.5f) set_add(a->p3_stick_down, &a->p3_nstick, PAD_LEFT);
+			else if (a->p3_stick[0] > 0.5f) set_add(a->p3_stick_down, &a->p3_nstick, PAD_RIGHT);
+			if (a->p3_stick[1] < -0.5f) set_add(a->p3_stick_down, &a->p3_nstick, PAD_UP);
+			else if (a->p3_stick[1] > 0.5f) set_add(a->p3_stick_down, &a->p3_nstick, PAD_DOWN);
+		} else if (axis == 4 || axis == 5) a->p3_trig[axis - 4] = v > 0.5f;
+		return;
 	}
 	if (player == 1) {
 		if (a->state != ST_GAME || !a->emu2) return;
@@ -1042,7 +1071,8 @@ int app_update(App* a, double dt) {
 	if (a->state == ST_GAME && a->emu) {
 		emu_set_keys(a->emu, keymask(a));
 		if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
-		/* El turbo por frame pertenece al modo single-thread; el par enlazado tiene pacing independiente. */
+		if (a->emu3) emu_set_keys(a->emu3, keymask3(a));
+		/* El turbo por frame solo es válido con un núcleo aislado. */
 		a->turbo = !a->emu2 && turbo_active(a);
 		for (int k = 0; k < (a->turbo ? TURBO_FRAMES : 1); k++) {
 			emu_run_frame(a->emu);
@@ -1054,6 +1084,7 @@ int app_update(App* a, double dt) {
 		}
 		emu_copy_video(a->emu, a->frame);
 		if (a->emu2) emu_copy_video(a->emu2, a->frame2);
+		if (a->emu3) emu_copy_video(a->emu3, a->frame3);
 		a->have_frame = 1;
 		a->fps_n++;
 		a->fps_acc += dt;
@@ -1187,11 +1218,11 @@ void app_destroy(App* a) {
 	}
 	if (a->web_launch_emu) {
 		emu_close(a->web_launch_emu);
-		a->web_launch_emu = a->web_launch_emu2 = NULL;
+		a->web_launch_emu = a->web_launch_emu2 = a->web_launch_emu3 = NULL;
 	}
 #endif
 	if (a->emu) emu_close(a->emu);
-	a->emu = a->emu2 = NULL;
+	a->emu = a->emu2 = a->emu3 = NULL;
 	for (int n = 1; n <= SLOT_COUNT; n++) cv_free(a->slot_thumbs[n]);
 	ui_free_assets(a);
 	cv_free(a->ui);
