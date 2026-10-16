@@ -20,6 +20,7 @@ static const char* APP_VERSION = "2.0.0";
 
 /* ------------------------------------------------------------------ geometría */
 Rect ui_card_rect(const App* a, int i) { (void) a; return rect_make(60 + i * 620, 205, 560, 315); }
+Rect ui_battle_slot_rect(void) { return rect_make(60, 555, 540, 370); }
 Rect ui_btn_rect(int j) {
 	static const int w[4] = {360, 330, 260, 200};
 	int x = 60;
@@ -87,6 +88,27 @@ static Canvas* make_placeholder(const GameInfo* g, int w, int h) {
 	return c;
 }
 
+static Canvas* make_battle_placeholder(int w, int h) {
+	Canvas* c = cv_new(w, h);
+	if (!c) return NULL;
+	for (int y = 0; y < h; y++) {
+		float t = y / (float) (h - 1);
+		int r = (int) (7 + 10 * t);
+		int g = (int) (14 + 18 * t);
+		int b = (int) (34 + 25 * t);
+		gfx_rect(c, rect_make(0, y, w, 1), RGB(r, g, b));
+	}
+	/* Ilustración abstracta para reservar el hueco sin depender de una ROM ni de arte externo. */
+	gfx_circle(c, w * 0.83f, h * 0.45f, h * 0.38f, ARGB(35, 35, 115, 245));
+	gfx_ring(c, w * 0.83f, h * 0.45f, h * 0.28f, 7, RGB(255, 181, 46));
+	gfx_line(c, w * 0.58f, 0, w * 0.43f, h, 5, ARGB(70, 255, 255, 255));
+	gfx_line(c, w * 0.69f, 0, w * 0.54f, h, 2, ARGB(45, 255, 255, 255));
+	gfx_text(c, "SONIC BATTLE", (int) (w * 0.055f), (int) (h * 0.28f), (int) (h * 0.16f), C_WHITE, TX_BOLD);
+	gfx_text(c, "ESPACIO RESERVADO", (int) (w * 0.06f), (int) (h * 0.52f), (int) (h * 0.075f), RGB(255, 198, 65), TX_BOLD);
+	gfx_text(c, "assets/games/sonicbattle.png", (int) (w * 0.06f), h - (int) (h * 0.11f), (int) (h * 0.055f), RGB(200, 211, 235), 0);
+	return c;
+}
+
 void ui_load_assets(App* a) {
 	Canvas* raw = load_png_named(a->assets_dir, "icon");
 	if (raw) { a->icon = cv_fit(raw, 100, 100); cv_free(raw); }
@@ -100,6 +122,14 @@ void ui_load_assets(App* a) {
 		cv_free(raw);
 		if (bg) { cv_shade(bg, 150); for (int i = 0; i < UI_W * UI_H; i++) bg->px[i] |= 0xFF000000u; cv_free(a->bg_base); a->bg_base = bg; }
 	}
+	Canvas* battle = load_png_named(a->games_art_dir, "sonicbattle");
+	if (battle) {
+		a->battle_slot = cv_cover(battle, 560, 315);
+		cv_free(battle);
+	} else {
+		a->battle_slot = make_battle_placeholder(560, 315);
+	}
+
 	for (int i = 0; i < NUM_GAMES; i++) {
 		/* El fondo difuminado solo conserva 80x45 píxeles de detalle. No hace falta
 		 * escalar primero la carátula a 1920x1080 para reducirla inmediatamente:
@@ -139,7 +169,7 @@ void ui_load_assets(App* a) {
 }
 
 void ui_free_assets(App* a) {
-	cv_free(a->icon); cv_free(a->title); cv_free(a->bg_base);
+	cv_free(a->icon); cv_free(a->title); cv_free(a->bg_base); cv_free(a->battle_slot);
 	for (int i = 0; i < NUM_GAMES; i++) { cv_free(a->cards[i]); cv_free(a->cards_dark[i]); cv_free(a->backdrops[i]); }
 }
 
@@ -314,28 +344,48 @@ static int wrap_lines(const char* text, int size, int maxw, char lines[][256], i
 	return n;
 }
 
+static void draw_battle_slot(App* a, Canvas* c) {
+	Rect r = ui_battle_slot_rect();
+	panel(c, r, ARGB(225, 7, 10, 24), 25, ARGB(100, 255, 181, 46), 2);
+	Rect art = rect_make(r.x + 16, r.y + 15, r.w - 32, 286);
+	gfx_rrect(c, rect_inflate(art, 5, 5), 16, ARGB(210, 0, 0, 0));
+	if (a->battle_slot) gfx_blit_scaled(c, a->battle_slot, art, 255);
+	else {
+		panel(c, art, ARGB(255, 12, 22, 48), 14, ARGB(170, 80, 150, 255), 2);
+		T(c, "SONIC BATTLE", art.x + art.w / 2, art.y + art.h / 2, 34, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
+	}
+	Rect foot = rect_make(r.x + 15, r.y + 307, r.w - 30, 47);
+	panel(c, foot, ARGB(235, 13, 17, 32), 14, ARGB(90, 255, 255, 255), 1);
+	T(c, "SONIC BATTLE  ·  ESPACIO RESERVADO",
+	  foot.x + foot.w / 2, foot.y + foot.h / 2, 20, RGB(255, 205, 75), TX_BOLD | TX_CENTER | TX_VMID);
+}
+
 static void draw_detail(App* a, Canvas* c) {
 	const GameInfo* g = &GAMES[a->sel];
 	int has = a->rom_found[a->sel];
-	Rect box = rect_make(60, 555, UI_W - 120, 370);
-	panel(c, box, ARGB(205, 8, 10, 22), 26, ARGB(40, 255, 255, 255), 2);
-	gfx_rrect(c, rect_make(box.x + 36, box.y + 30, 8, 82), 4, g->accent);
-	T(c, g->title, box.x + 62, box.y + 22, 64, C_WHITE, TX_BOLD);
-	T(c, g->tagline, box.x + 64, box.y + 100, 30, g->accent, TX_BOLD);
-	char lines[7][256];
-	int n = wrap_lines(g->summary, 26, 1050, lines, 6);
-	for (int i = 0; i < n; i++) T(c, lines[i], box.x + 52, box.y + 158 + i * 36, 26, C_SOFT, 0);
+	/* La ficha se reduce al área azul de la referencia; el tercio inferior izquierdo
+	 * queda reservado para una futura entrada de Sonic Battle. */
+	Rect box = rect_make(625, 555, UI_W - 685, 370);
+	panel(c, box, ARGB(222, 8, 10, 22), 26, ARGB(55, 255, 255, 255), 2);
+	gfx_rrect(c, rect_make(box.x + 23, box.y + 25, 7, 68), 4, g->accent);
+	T(c, g->title, box.x + 43, box.y + 15, 50, C_WHITE, TX_BOLD);
+	T(c, g->tagline, box.x + 43, box.y + 78, 23, g->accent, TX_BOLD);
 
-	char st[160];
-	snprintf(st, sizeof(st), "Falta %s", g->rom);
+	char lines[7][256];
+	int n = wrap_lines(g->summary, 21, 535, lines, 6);
+	for (int i = 0; i < n; i++)
+		T(c, lines[i], box.x + 38, box.y + 128 + i * 32, 21, C_SOFT, 0);
+
+	char st[96];
+	snprintf(st, sizeof(st), "Falta ROM");
 	const char* labels[7] = {"ESTADO", "AÑO", "DESARROLLO", "EDITOR", "GÉNERO", "PLATAFORMA", "ARCHIVO ROM"};
 	const char* vals[7] = {has ? "Lista para jugar" : st, g->year, g->dev, g->pub, g->genre, "Game Boy Advance", g->rom};
-	int x0 = box.x + 1210;
-	gfx_rect(c, rect_make(x0 - 40, box.y + 28, 2, box.h - 56), ARGB(40, 255, 255, 255));
+	int x0 = box.x + 635;
+	gfx_rect(c, rect_make(x0 - 28, box.y + 25, 2, box.h - 50), ARGB(55, 255, 255, 255));
 	for (int i = 0; i < 7; i++) {
-		int y = box.y + 30 + i * 47;
-		T(c, labels[i], x0, y + 5, 20, C_MUTED, TX_BOLD);
-		T(c, vals[i], x0 + 190, y, 26, i == 0 ? (has ? C_GREEN : C_RED) : C_WHITE, i == 0 ? TX_BOLD : 0);
+		int y = box.y + 22 + i * 45;
+		T(c, labels[i], x0, y + 5, 18, C_MUTED, TX_BOLD);
+		T(c, vals[i], x0 + 154, y, 22, i == 0 ? (has ? C_GREEN : C_RED) : C_WHITE, i == 0 ? TX_BOLD : 0);
 	}
 }
 
@@ -583,6 +633,7 @@ void ui_draw(App* a) {
 	}
 	draw_header(a, c);
 	draw_cards(a, c);
+	draw_battle_slot(a, c);
 	draw_detail(a, c);
 	draw_buttons(a, c);
 	draw_toast(a, c, 1050);
