@@ -274,14 +274,16 @@ static void touch_event_down(App* app, SDL_TouchFingerEvent* ev) {
 	mouse_to_ui(wx, wy, &ux, &uy);
 	TouchPoint* tp = touch_find(ev->fingerId, 1);
 	if (!tp) return;
-	if (P.last_in_game && !app_touch_menu_active(app)) {
-		/* Flechas del volumen en pausa; pueden usarse con el dedo directamente. */
+	/* Las flechas del volumen deben seguir activas mientras el menú está en pausa. */
+	if (P.last_in_game) {
 		int volume_delta = app_pause_volume_arrow_hit(app, ux, uy);
 		if (volume_delta) {
 			tp->kind = TOUCH_VOLUME; tp->code = volume_delta; tp->code2 = -1;
 			send_app_event_j1(app, EV_TOUCH_VOLUME, 0, volume_delta);
 			return;
 		}
+	}
+	if (P.last_in_game && !app_touch_menu_active(app)) {
 		TouchHit hit = touch_hit(app, (int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
 		if (hit.kind == TOUCH_ACTION && hit.code == ACT_PAUSE) {
 			touch_release_all(app);
