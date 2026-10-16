@@ -88,6 +88,7 @@ struct App {
 	/* recursos */
 	Canvas *icon, *title, *bg_base, *ui;
 	Canvas *cards[NUM_GAMES], *cards_dark[NUM_GAMES], *backdrops[NUM_GAMES];
+	Canvas* battle_slot; /* tarjeta visual reservada para Sonic Battle */
 };
 
 typedef struct { int kind; const char* label; int field; } SettingItem;   /* kind: 0 interruptor, 1 deslizador, 2 ir a, 3 acción, 4 volver */
@@ -113,6 +114,7 @@ void ui_free_assets(App* a);
 void ui_draw(App* a);
 /* geometría (compartida con la lógica de ratón) */
 Rect ui_card_rect(const App* a, int i);
+Rect ui_battle_slot_rect(void);
 Rect ui_btn_rect(int j);
 Rect ui_settings_row(int k);
 Rect ui_ctrl_row_rect(int k);
