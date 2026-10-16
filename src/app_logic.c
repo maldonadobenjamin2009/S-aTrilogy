@@ -901,7 +901,8 @@ static void mouse_move(App* a, int x, int y) {
 	} else if (a->state == ST_SLOTS) {
 		for (int n = 0; n < SLOT_COUNT; n++) if (rect_has(ui_slot_rect(n), x, y)) a->slot_sel = n;
 	} else {
-		for (int i = 0; i < NUM_GAMES; i++) if (rect_has(ui_card_rect(a, i), x, y)) { a->sel = i; a->zone = 0; return; }
+		if (rect_has(ui_battle_slot_rect(), x, y)) { a->sel = 3; a->zone = 0; return; }
+		for (int i = 0; i < 3; i++) if (rect_has(ui_card_rect(a, i), x, y)) { a->sel = i; a->zone = 0; return; }
 		for (int j = 0; j < 4; j++) if (rect_has(ui_btn_rect(j), x, y)) { a->zone = 1; a->btn = j; return; }
 	}
 }
@@ -917,10 +918,12 @@ static void mouse_click(App* a, int x, int y) {
 	if (a->capture_kind >= 0) { a->capture_kind = -1; return; }
 	if (a->state == ST_MAIN) {
 		if (rect_has(ui_battle_slot_rect(), x, y)) {
-			app_toast(a, "Sonic Battle: espacio reservado para integrar el juego.");
+			int was = (a->sel == 3 && a->zone == 0);
+			a->sel = 3; a->zone = 0;
+			if (was) { a->pending_launch = 3; request_launch_check(a); }
 			return;
 		}
-		for (int i = 0; i < NUM_GAMES; i++) if (rect_has(ui_card_rect(a, i), x, y)) {
+		for (int i = 0; i < 3; i++) if (rect_has(ui_card_rect(a, i), x, y)) {
 			int was = (a->sel == i && a->zone == 0);
 			a->sel = i; a->zone = 0;
 			if (was) { a->pending_launch = i; request_launch_check(a); }
