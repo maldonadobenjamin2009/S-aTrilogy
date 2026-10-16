@@ -267,31 +267,7 @@ static void set_cursor(App* a) {
 
 static int s_logged_first_audio_chunk;
 
-static void start_game_now(App* a, int i, int multiplayer) {
-	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
-	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
-	sys_mkdir_p(a->saves_dir);
-	sys_stem(a->rom_path[i], stem, sizeof(stem));
-	snprintf(save, sizeof(save), "%s/%s.sav", a->saves_dir, stem);
-	a->emu2 = NULL;
-	if (multiplayer) {
-		snprintf(save2, sizeof(save2), "%s/%s.p2.sav", a->saves_dir, stem);
-		a->emu = emu_open_linked_pair(a->rom_path[i], save, save2,
-		                             sys_file_exists(a->bios_file) ? a->bios_file : NULL,
-		                             a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u,
-		                             &a->emu2);
-	} else {
-		a->emu = emu_open(a->rom_path[i], save, sys_file_exists(a->bios_file) ? a->bios_file : NULL,
-		                  a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u);
-	}
-	if (!a->emu) {
-		a->emu2 = NULL;
-		debug_log_error("No se pudo iniciar %s en modo %s", GAMES[i].title, multiplayer ? "multijugador" : "un jugador");
-		app_modal(a, "No se pudo iniciar el juego", multiplayer
-		          ? "mGBA no pudo crear la conexión por cable link. Comprueba que la ROM de GBA sea válida."
-		          : "mGBA no pudo abrir la ROM. Comprueba que es una ROM de GBA válida (.gba sin comprimir).");
-		return;
-	}
+static void activate_game(App* a, int i) {
 	a->game_idx = i;
 	a->audio_ratio = 1.0;
 	a->audio_fill_avg = 0.0;
@@ -311,6 +287,114 @@ static void start_game_now(App* a, int i, int multiplayer) {
 	         a->emu2 ? " [2 jugadores]" : "");
 	if (a->host.set_title) a->host.set_title(a->host.user, title);
 	if (a->emu2) app_toast(a, "Pantalla dividida: J1 izquierda · J2 derecha");
+}
+
+#if defined(__EMSCRIPTEN__)
+static void* web_link_launch_worker(void* arg) {
+	App* a = (App*) arg;
+	Emu* second = NULL;
+	Emu* first = emu_open_linked_pair(
+		a->web_launch_rom, a->web_launch_save, a->web_launch_save2,
+		a->web_launch_bios[0] ? a->web_launch_bios : NULL,
+		a->web_launch_audio_rate, &second);
+	a->web_launch_emu = first;
+	a->web_launch_emu2 = second;
+	a->web_launch_ok = first != NULL;
+	/* Publica los dos punteros y el estado solo después de terminar la inicialización. */
+	atomic_store_explicit(&a->web_launch_done, 1, memory_order_release);
+	return NULL;
+}
+
+static void poll_web_link_launch(App* a) {
+	if (!a->web_launch_active ||
+	    !atomic_load_explicit(&a->web_launch_done, memory_order_acquire)) return;
+	/* done se publica justo al final del trabajador; el join ya no espera al arranque. */
+	pthread_join(a->web_launch_thread, NULL);
+	a->web_launch_active = 0;
+	a->loading = 0;
+	a->pending_launch = -1;
+	int game = a->web_launch_game;
+	if (!a->web_launch_ok || !a->web_launch_emu) {
+		a->emu = NULL;
+		a->emu2 = NULL;
+		a->web_launch_emu = NULL;
+		a->web_launch_emu2 = NULL;
+		debug_log_error("No se pudo iniciar %s en modo multijugador web", GAMES[game].title);
+		app_modal(a, "No se pudo iniciar el juego",
+		          "mGBA no pudo crear la conexión por cable link. Comprueba la ROM y que Chrome permita los trabajadores WebAssembly.");
+		return;
+	}
+	a->emu = a->web_launch_emu;
+	a->emu2 = a->web_launch_emu2;
+	a->web_launch_emu = NULL;
+	a->web_launch_emu2 = NULL;
+	activate_game(a, game);
+}
+#endif
+
+static void start_game_now(App* a, int i, int multiplayer) {
+	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
+	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
+	sys_mkdir_p(a->saves_dir);
+	sys_stem(a->rom_path[i], stem, sizeof(stem));
+	snprintf(save, sizeof(save), "%s/%s.sav", a->saves_dir, stem);
+	snprintf(save2, sizeof(save2), "%s/%s.p2.sav", a->saves_dir, stem);
+	a->emu = NULL;
+	a->emu2 = NULL;
+
+#if defined(__EMSCRIPTEN__)
+	if (multiplayer) {
+		/* mCoreThreadStart espera a que cada núcleo pase a RUNNING. Hacerlo dentro
+		 * del evento de clic bloqueaba el event loop de Chrome durante el handshake.
+		 * Un trabajador temporal coordina el arranque; los dos hilos GBA quedan en
+		 * sus propios workers y la interfaz sigue repintándose mientras tanto. */
+		snprintf(a->web_launch_rom, sizeof(a->web_launch_rom), "%s", a->rom_path[i]);
+		snprintf(a->web_launch_save, sizeof(a->web_launch_save), "%s", save);
+		snprintf(a->web_launch_save2, sizeof(a->web_launch_save2), "%s", save2);
+		if (sys_file_exists(a->bios_file))
+			snprintf(a->web_launch_bios, sizeof(a->web_launch_bios), "%s", a->bios_file);
+		else a->web_launch_bios[0] = 0;
+		a->web_launch_audio_rate = a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u;
+		a->web_launch_game = i;
+		a->web_launch_emu = a->web_launch_emu2 = NULL;
+		a->web_launch_ok = 0;
+		atomic_store_explicit(&a->web_launch_done, 0, memory_order_relaxed);
+		a->web_launch_active = 1;
+		a->pending_launch = i;
+		a->loading = 1;
+		int err = pthread_create(&a->web_launch_thread, NULL, web_link_launch_worker, a);
+		if (err != 0) {
+			a->web_launch_active = 0;
+			a->pending_launch = -1;
+			a->loading = 0;
+			debug_log_error("No se pudo crear el trabajador de arranque web (pthread_create=%d)", err);
+			app_modal(a, "No se pudo iniciar el juego",
+			          "Chrome no pudo reservar un trabajador para iniciar el multijugador. Recarga la página y vuelve a intentarlo.");
+		} else {
+			debug_log_info("Web 2J: inicialización de mGBA delegada a un trabajador; la interfaz permanece activa");
+		}
+		return;
+	}
+#endif
+
+	if (multiplayer) {
+		a->emu = emu_open_linked_pair(a->rom_path[i], save, save2,
+		                             sys_file_exists(a->bios_file) ? a->bios_file : NULL,
+		                             a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u,
+		                             &a->emu2);
+	} else {
+		a->emu = emu_open(a->rom_path[i], save, sys_file_exists(a->bios_file) ? a->bios_file : NULL,
+		                  a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u);
+	}
+	if (!a->emu) {
+		a->emu2 = NULL;
+		debug_log_error("No se pudo iniciar %s en modo %s", GAMES[i].title, multiplayer ? "multijugador" : "un jugador");
+		app_modal(a, "No se pudo iniciar el juego", multiplayer
+		          ? "mGBA no pudo crear la conexión por cable link. Comprueba que la ROM de GBA sea válida."
+		          : "mGBA no pudo abrir la ROM. Comprueba que es una ROM de GBA válida (.gba sin comprimir).");
+		return;
+	}
+	activate_game(a, i);
 }
 
 static void start_game(App* a, int i) {
@@ -845,6 +929,9 @@ static int touch_menu_action(int code) {
 }
 
 void app_event(App* a, const AppEvent* ev) {
+#if defined(__EMSCRIPTEN__)
+	if (a->web_launch_active && ev->type != EV_QUIT) return;
+#endif
 	switch (ev->type) {
 	case EV_QUIT: a->quit = 1; break;
 	case EV_KEY_DOWN: on_key_down(a, ev->code, ev->value); break;
@@ -902,6 +989,9 @@ void app_event(App* a, const AppEvent* ev) {
 int app_update(App* a, double dt) {
 	a->now += dt;
 	if (a->quit) return 0;
+#if defined(__EMSCRIPTEN__)
+	poll_web_link_launch(a);
+#endif
 	for (int i = 0; i < NUM_GAMES; i++) {
 		float t = i == a->sel ? 1.0f : 0.0f, k = (float) (dt * 12.0);
 		a->anim[i] += (t - a->anim[i]) * (k > 1 ? 1 : k);
@@ -913,7 +1003,11 @@ int app_update(App* a, double dt) {
 	for (int d = 0; d < 4; d++)
 		if (a->held_dir[d] && a->now >= a->held_t[d]) { dispatch(a, d); a->held_t[d] = a->now + 0.13; }
 
-	if (a->pending_launch >= 0 && a->state == ST_MAIN) {
+	if (a->pending_launch >= 0 && a->state == ST_MAIN
+#if defined(__EMSCRIPTEN__)
+	    && !a->web_launch_active
+#endif
+	   ) {
 		if (!a->loading) a->loading = 1;                 /* dibuja un fotograma de "Iniciando…" primero */
 		else { int i = a->pending_launch; a->pending_launch = -1; a->loading = 0; start_game(a, i); }
 	}
@@ -1002,6 +1096,10 @@ int app_pause_volume_arrow_hit(const App* a, int ui_x, int ui_y) {
 App* app_create(const char* base_dir, const AppHost* host) {
 	App* a = calloc(1, sizeof(App));
 	if (!a) return NULL;
+#if defined(__EMSCRIPTEN__)
+	atomic_init(&a->web_launch_done, 0);
+	a->web_launch_game = -1;
+#endif
 	if (host) a->host = *host;
 	snprintf(a->base, sizeof(a->base), "%s", base_dir);
 	/* Los recursos instalados (ROMs/assets) pueden estar en una carpeta de solo lectura.
@@ -1054,6 +1152,18 @@ App* app_create(const char* base_dir, const AppHost* host) {
 
 void app_destroy(App* a) {
 	if (!a) return;
+#if defined(__EMSCRIPTEN__)
+	if (a->web_launch_active) {
+		/* El trabajador conserva App* hasta publicar su resultado. Esperarlo evita
+		 * liberar el estado mientras mGBA aún está creando los dos núcleos. */
+		pthread_join(a->web_launch_thread, NULL);
+		a->web_launch_active = 0;
+	}
+	if (a->web_launch_emu) {
+		emu_close(a->web_launch_emu);
+		a->web_launch_emu = a->web_launch_emu2 = NULL;
+	}
+#endif
 	if (a->emu) emu_close(a->emu);
 	a->emu = a->emu2 = NULL;
 	for (int n = 1; n <= SLOT_COUNT; n++) cv_free(a->slot_thumbs[n]);
