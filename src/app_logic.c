@@ -1,3 +1,9 @@
+#if defined(__EMSCRIPTEN__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
+#if defined(__EMSCRIPTEN__)
+#include <errno.h>
+#endif
 /* app_logic.c - estado, entrada, menús, emulación, ranuras de guardado (portable). */
 #include "app_internal.h"
 #include "debug_log.h"
@@ -308,8 +314,14 @@ static void* web_link_launch_worker(void* arg) {
 static void poll_web_link_launch(App* a) {
 	if (!a->web_launch_active ||
 	    !atomic_load_explicit(&a->web_launch_done, memory_order_acquire)) return;
-	/* done se publica justo al final del trabajador; el join ya no espera al arranque. */
-	pthread_join(a->web_launch_thread, NULL);
+	/* No bloquear el hilo del navegador ni siquiera durante la salida del trabajador.
+	 * La bandera done puede publicarse unas instrucciones antes de que termine el hilo. */
+	int join_status = pthread_tryjoin_np(a->web_launch_thread, NULL);
+	if (join_status == EBUSY) return;
+	if (join_status != 0) {
+		debug_log_warn("No se pudo confirmar el fin del trabajador de arranque web: %d", join_status);
+		return;
+	}
 	a->web_launch_active = 0;
 	a->loading = 0;
 	a->pending_launch = -1;
