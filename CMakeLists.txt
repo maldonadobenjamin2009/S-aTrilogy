@@ -70,7 +70,12 @@ elseif(APPLE)
   # la API del sistema ni compilar el fallback POSIX incluido en mGBA.
   target_compile_definitions(emu_core PRIVATE USE_PTHREADS _DARWIN_C_SOURCE HAVE_LOCALE HAVE_XLOCALE HAVE_SNPRINTF_L HAVE_STRTOF_L HAVE_STRLCPY)
   find_package(Threads REQUIRED)
-  target_link_libraries(emu_core PUBLIC Threads::Threads)
+  # mGBA utiliza CoreFoundation para resolver la ruta del archivo de configuración portable.
+  find_library(COREFOUNDATION_FRAMEWORK CoreFoundation)
+  if(NOT COREFOUNDATION_FRAMEWORK)
+    message(FATAL_ERROR "No se encontró el framework CoreFoundation de macOS")
+  endif()
+  target_link_libraries(emu_core PUBLIC Threads::Threads ${COREFOUNDATION_FRAMEWORK})
 elseif(ANDROID)
   # Bionic/NDK ya proporciona strtof_l (API 21+). Evita que el fallback de mGBA
   # vuelva a definirla y choque con legacy_stdlib_inlines.h del NDK.
