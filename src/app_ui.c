@@ -378,8 +378,8 @@ static void draw_battle_slot(App* a, Canvas* c) {
 static void draw_detail(App* a, Canvas* c) {
 	const GameInfo* g = &GAMES[a->sel];
 	int has = a->rom_found[a->sel];
-	/* La ficha se reduce al área azul de la referencia; el tercio inferior izquierdo
-	 * queda reservado para una futura entrada de Sonic Battle. */
+	/* La ficha usa el área derecha; la tarjeta independiente de Sonic Battle
+	 * ocupa el sector inferior izquierdo. Ambos seleccionan el mismo estado de juego. */
 	Rect box = rect_make(625, 555, UI_W - 685, 370);
 	panel(c, box, ARGB(222, 8, 10, 22), 26, ARGB(55, 255, 255, 255), 2);
 	gfx_rrect(c, rect_make(box.x + 23, box.y + 25, 7, 68), 4, g->accent);
