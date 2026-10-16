@@ -5,6 +5,10 @@
 #include "emu.h"
 #include "keys.h"
 #include "sys.h"
+#if defined(__EMSCRIPTEN__)
+#include <pthread.h>
+#include <stdatomic.h>
+#endif
 
 #define NUM_GAMES 3
 #define SLOT_COUNT 8
@@ -47,6 +51,17 @@ struct App {
 	int modal; char modal_title[96], modal_text[512];
 	char toast[200]; double toast_until;
 	int pending_launch, loading;
+#if defined(__EMSCRIPTEN__)
+	/* El arranque del cable link se ejecuta fuera del hilo que dibuja el navegador.
+	 * La bandera atómica publica los punteros de salida una vez inicializados. */
+	pthread_t web_launch_thread;
+	atomic_int web_launch_done;
+	int web_launch_active, web_launch_ok, web_launch_game;
+	Emu* web_launch_emu; Emu* web_launch_emu2;
+	char web_launch_rom[PATH_MAX_APP], web_launch_save[PATH_MAX_APP];
+	char web_launch_save2[PATH_MAX_APP], web_launch_bios[PATH_MAX_APP];
+	unsigned web_launch_audio_rate;
+#endif
 	float anim[NUM_GAMES];
 	char rom_path[NUM_GAMES][PATH_MAX_APP]; int rom_found[NUM_GAMES]; double last_scan;
 
