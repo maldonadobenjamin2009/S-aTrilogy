@@ -268,6 +268,10 @@ int main(int argc, char** argv) {
 	key(K_TAB); step(5); CHECK(app->state == ST_SETTINGS, "ajustes");
 	shot("11_ajustes");
 	key(K_ESCAPE); CHECK(app->state == ST_MAIN, "volver de ajustes");
+	/* La tarjeta adicional se ve y responde, aunque aún no sea una ROM jugable. */
+	Rect battle_slot = ui_battle_slot_rect();
+	ev(EV_MOUSE_DOWN, battle_slot.x + battle_slot.w / 2, battle_slot.y + battle_slot.h / 2);
+	CHECK(strstr(app->toast, "Sonic Battle") != NULL, "tarjeta reservada de Sonic Battle responde al clic");
 	/* ratón */
 	ev(EV_MOUSE_MOVE, ui_card_rect(app, 2).x + 20, ui_card_rect(app, 2).y + 20); CHECK(app->sel == 2, "ratón: hover");
 	ev(EV_MOUSE_MOVE, ui_btn_rect(3).x + 5, ui_btn_rect(3).y + 5); CHECK(app->zone == 1 && app->btn == 3, "ratón: botón");
