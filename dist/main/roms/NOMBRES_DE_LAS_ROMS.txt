@@ -10,4 +10,6 @@ Pon copias de tus propios juegos de GBA en ESTA carpeta
     Sonic Battle     ->  sonicbattle.gba
 
 Los juegos cuya ROM no este en esta carpeta apareceran oscurecidos en el launcher.
+Sonic Battle permite seleccionar 1J, 2J o 3J en local. El tercer jugador usa IJKL, N/M (A/B), U/O (L/R), P (Start) y H (Select), o puede usar un tercer mando.
+
 Si anades una ROM con el launcher abierto, se detecta sola en un segundo.

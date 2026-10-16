@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
 	key(K_TAB); step(5); CHECK(app->state == ST_SETTINGS, "ajustes");
 	shot("11_ajustes");
 	key(K_ESCAPE); CHECK(app->state == ST_MAIN, "volver de ajustes");
-	/* Sonic Battle debe usar exactamente el mismo recorrido de emulación mGBA. */
+	/* Sonic Battle usa la sesión de cable link de mGBA también con tres núcleos. */
 	Rect battle_slot = ui_battle_slot_rect();
 	app->sel = 0; app->zone = 0;
 	ev(EV_MOUSE_DOWN, battle_slot.x + battle_slot.w / 2, battle_slot.y + battle_slot.h / 2);
@@ -278,13 +278,29 @@ int main(int argc, char** argv) {
 	CHECK(app->pending_launch == 3, "segundo clic solicita iniciar Sonic Battle");
 	step(1); CHECK(app->loading, "Sonic Battle muestra pantalla de carga");
 	step(1);
-	CHECK(app->modal && app->modal_kind == 1, "Sonic Battle abre selector 1J/2J");
+	CHECK(app->modal && app->modal_kind == 1 && strstr(app->modal_title, "JUGADORES"),
+	      "Sonic Battle ofrece selector 1J/2J/3J");
+	key(K_RIGHT); key(K_RIGHT);
+	CHECK(app->modal_choice == 2, "el selector permite elegir 3J");
 	key(K_RETURN);
-	CHECK(app->state == ST_GAME && app->emu && app->game_idx == 3,
-	      "Sonic Battle inicia con el núcleo mGBA estándar");
-	stepg(3); CHECK(app->have_frame, "Sonic Battle genera fotogramas");
+	CHECK(app->state == ST_GAME && app->emu && app->emu2 && app->emu3 && app->game_idx == 3,
+	      "Sonic Battle inicia tres núcleos mGBA enlazados");
+	stepg(4);
+	AppFrame battle_frame; app_render(app, &battle_frame);
+	CHECK(app->have_frame && battle_frame.in_game && battle_frame.multiplayer == 2 &&
+	      battle_frame.game && battle_frame.game2 && battle_frame.game3,
+	      "modo 3J entrega tres fotogramas independientes para la disposición triangular");
+	key(K_F5); CHECK(strstr(app->toast, "Guardado rápido") != NULL, "guardado rápido en Sonic Battle 3J");
+	char battle_state[720]; slot_path(app, app->last_slot, battle_state, sizeof(battle_state));
+	CHECK(sys_file_exists(battle_state), "estado guardado de Sonic Battle J1");
+	char battle_state2[760]; snprintf(battle_state2, sizeof(battle_state2), "%s.p2", battle_state);
+	char battle_state3[760]; snprintf(battle_state3, sizeof(battle_state3), "%s.p3", battle_state);
+	CHECK(sys_file_exists(battle_state2), "estado guardado de Sonic Battle J2");
+	CHECK(sys_file_exists(battle_state3), "estado guardado de Sonic Battle J3");
+	key(K_F8); CHECK(strstr(app->toast, "Carga rápida") != NULL, "carga rápida sincronizada en Sonic Battle 3J");
 	key(K_ESCAPE); step(1); app->pause_sel = 7; key(K_RETURN);
-	CHECK(app->state == ST_MAIN && !app->emu, "Sonic Battle vuelve al launcher desde la pausa");
+	CHECK(app->state == ST_MAIN && !app->emu && !app->emu2 && !app->emu3,
+	      "Sonic Battle 3J sale de la pausa y libera los tres núcleos");
 	/* ratón */
 	ev(EV_MOUSE_MOVE, ui_card_rect(app, 2).x + 20, ui_card_rect(app, 2).y + 20); CHECK(app->sel == 2, "ratón: hover");
 	ev(EV_MOUSE_MOVE, ui_btn_rect(3).x + 5, ui_btn_rect(3).y + 5); CHECK(app->zone == 1 && app->btn == 3, "ratón: botón");
