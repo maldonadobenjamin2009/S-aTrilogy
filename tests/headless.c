@@ -81,6 +81,7 @@ int main(int argc, char** argv) {
 	char path[700];
 	snprintf(path, sizeof(path), "%s/main/roms", work); sys_mkdir_p(path);
 	snprintf(path, sizeof(path), "%s/main/roms/SonicAdvance.GBA", work); write_test_rom(path);
+	snprintf(path, sizeof(path), "%s/main/roms/sonicbattle.gba", work); write_test_rom(path);
 	snprintf(path, sizeof(path), "%s/main/config.txt", work); sys_remove(path);
 	for (int n = 1; n <= SLOT_COUNT; n++) {
 		snprintf(path, sizeof(path), "%s/main/saves/SonicAdvance.ss%d", work, n); sys_remove(path);
@@ -101,7 +102,7 @@ int main(int argc, char** argv) {
 	CHECK(app != NULL, "app_create");
 	CHECK(app->cfg.pad[0][ACT_PAUSE] == PAD_TOUCHPAD && app->cfg.pad[1][ACT_PAUSE] == PAD_TOUCHPAD, "panel táctil como pausa predeterminada");
 	printf("mGBA %s | roms: %d %d %d\n", emu_version(), app->rom_found[0], app->rom_found[1], app->rom_found[2]);
-	CHECK(app->rom_found[0] && !app->rom_found[1] && !app->rom_found[2], "detección de ROMs (sin distinguir mayúsculas)");
+	CHECK(app->rom_found[0] && !app->rom_found[1] && !app->rom_found[2] && app->rom_found[3], "detección de las tres Advance y Sonic Battle");
 
 	step(30); shot("01_principal");
 	key(K_RIGHT); step(30); shot("02_principal_sin_rom");
@@ -268,10 +269,22 @@ int main(int argc, char** argv) {
 	key(K_TAB); step(5); CHECK(app->state == ST_SETTINGS, "ajustes");
 	shot("11_ajustes");
 	key(K_ESCAPE); CHECK(app->state == ST_MAIN, "volver de ajustes");
-	/* La tarjeta adicional se ve y responde, aunque aún no sea una ROM jugable. */
+	/* Sonic Battle debe usar exactamente el mismo recorrido de emulación mGBA. */
 	Rect battle_slot = ui_battle_slot_rect();
+	app->sel = 0; app->zone = 0;
 	ev(EV_MOUSE_DOWN, battle_slot.x + battle_slot.w / 2, battle_slot.y + battle_slot.h / 2);
-	CHECK(strstr(app->toast, "Sonic Battle") != NULL, "tarjeta reservada de Sonic Battle responde al clic");
+	CHECK(app->sel == 3 && app->pending_launch < 0, "primer clic selecciona Sonic Battle");
+	ev(EV_MOUSE_DOWN, battle_slot.x + battle_slot.w / 2, battle_slot.y + battle_slot.h / 2);
+	CHECK(app->pending_launch == 3, "segundo clic solicita iniciar Sonic Battle");
+	step(1); CHECK(app->loading, "Sonic Battle muestra pantalla de carga");
+	step(1);
+	CHECK(app->modal && app->modal_kind == 1, "Sonic Battle abre selector 1J/2J");
+	key(K_RETURN);
+	CHECK(app->state == ST_GAME && app->emu && app->game_idx == 3,
+	      "Sonic Battle inicia con el núcleo mGBA estándar");
+	stepg(3); CHECK(app->have_frame, "Sonic Battle genera fotogramas");
+	key(K_ESCAPE); step(1); app->pause_sel = 7; key(K_RETURN);
+	CHECK(app->state == ST_MAIN && !app->emu, "Sonic Battle vuelve al launcher desde la pausa");
 	/* ratón */
 	ev(EV_MOUSE_MOVE, ui_card_rect(app, 2).x + 20, ui_card_rect(app, 2).y + 20); CHECK(app->sel == 2, "ratón: hover");
 	ev(EV_MOUSE_MOVE, ui_btn_rect(3).x + 5, ui_btn_rect(3).y + 5); CHECK(app->zone == 1 && app->btn == 3, "ratón: botón");
