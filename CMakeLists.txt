@@ -149,7 +149,7 @@ if(EMSCRIPTEN)
     -O3 -flto
     -pthread
     "-sPTHREAD_POOL_SIZE=4"
-    "-sPTHREAD_POOL_SIZE_STRICT=4"
+    "-sPTHREAD_POOL_SIZE_STRICT=2"
     --use-port=sdl2
     "--shell-file=${CMAKE_CURRENT_SOURCE_DIR}/web/shell.html"
     "--preload-file=${CMAKE_CURRENT_SOURCE_DIR}/dist/assets@/assets"
