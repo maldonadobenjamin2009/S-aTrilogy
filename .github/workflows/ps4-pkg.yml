@@ -50,6 +50,21 @@ jobs:
           TOOLS="$SDK/bin/linux"
           mkdir -p "$TOOLS"
 
+          # Match the working OpenOrbis Piglet sample package layout. Pin the
+          # upstream toolchain commit so right.sprx and the matching runtime
+          # modules do not drift with a moving branch.
+          SAMPLE_DIR="/tmp/s-a-trilogy-openorbis-piglet"
+          SAMPLE_COMMIT="0a1aaf9dd4a92695538bdeb09fb056d06dd11725"
+          SAMPLE_BASE="https://raw.githubusercontent.com/OpenOrbis/OpenOrbis-PS4-Toolchain/$SAMPLE_COMMIT/samples/piglet"
+          mkdir -p "$SAMPLE_DIR/sce_sys/about" "$SAMPLE_DIR/sce_module"
+          for rel in sce_sys/about/right.sprx sce_module/libc.prx sce_module/libSceFios2.prx; do
+            curl -fsSL --retry 3 --retry-delay 2 "$SAMPLE_BASE/$rel" -o "$SAMPLE_DIR/$rel"
+            test -s "$SAMPLE_DIR/$rel" || { echo "::error::OpenOrbis sample file is empty: $rel"; exit 1; }
+          done
+          echo "OO_PS4_SAMPLE_DIR=$SAMPLE_DIR" >> "$GITHUB_ENV"
+          echo "Pinned OpenOrbis Piglet package inputs:"
+          sha256sum "$SAMPLE_DIR/sce_sys/about/right.sprx" "$SAMPLE_DIR/sce_module/libc.prx" "$SAMPLE_DIR/sce_module/libSceFios2.prx"
+
           # Some published toolchain archives lose executable bits when extracted.
           # Repair permissions on existing command-line tools before checking them.
           if [ -d "$TOOLS" ]; then
@@ -129,6 +144,9 @@ jobs:
             fi
           done
           ls -l "$SDK/bin/data/modules/libc.prx" "$SDK/bin/data/modules/libSceFios2.prx"
+          for rel in sce_sys/about/right.sprx sce_module/libc.prx sce_module/libSceFios2.prx; do
+            test -s "$OO_PS4_SAMPLE_DIR/$rel" || { echo "::error::Missing pinned OpenOrbis sample file: $rel"; exit 1; }
+          done
 
       - name: Check package inputs
         shell: bash
@@ -142,6 +160,9 @@ jobs:
             exit 1
           fi
           test -f ps4/sce_sys/icon0.png
+          test -s "$OO_PS4_SAMPLE_DIR/sce_sys/about/right.sprx"
+          test -s "$OO_PS4_SAMPLE_DIR/sce_module/libc.prx"
+          test -s "$OO_PS4_SAMPLE_DIR/sce_module/libSceFios2.prx"
           test -f "$OO_PS4_TOOLCHAIN/lib/libSDL2.a"
           echo "ROMs included in package: $count"
           echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"

@@ -19,25 +19,39 @@ cp -a dist/main/. "$STAGE/main/"
 cp -a dist/assets/. "$STAGE/assets/"
 cp ps4/sce_sys/icon0.png "$STAGE/sce_sys/icon0.png"
 
-# The official OpenOrbis Docker image intentionally omits the samples tree.
-# Copy the required runtime modules directly from the installed SDK instead of
-# requiring generated/binary sample files that are not tracked in its source repo.
+# Use the exact OpenOrbis Piglet sample runtime layout known to start correctly
+# on GoldHEN. The official CI container omits its samples tree, so the workflow
+# fetches these three small, version-pinned binary files into OO_PS4_SAMPLE_DIR.
+SAMPLE_DIR="${OO_PS4_SAMPLE_DIR:-$SDK/samples/piglet}"
+RIGHT_MODULE="${OO_PS4_RIGHT_MODULE:-$SAMPLE_DIR/sce_sys/about/right.sprx}"
+if [ ! -s "$RIGHT_MODULE" ]; then
+  for candidate in \
+    "$SDK/samples/piglet/sce_sys/about/right.sprx" \
+    "$SDK/samples/SDL2/sce_sys/about/right.sprx" \
+    "ps4/sce_sys/about/right.sprx"; do
+    if [ -s "$candidate" ]; then RIGHT_MODULE="$candidate"; break; fi
+  done
+fi
+if [ ! -s "$RIGHT_MODULE" ]; then
+  echo "ERROR: falta sce_sys/about/right.sprx. Define OO_PS4_SAMPLE_DIR con los archivos del sample Piglet de OpenOrbis." >&2
+  exit 1
+fi
+cp "$RIGHT_MODULE" "$STAGE/sce_sys/about/right.sprx"
+
 MODULE_DIR="$SDK/bin/data/modules"
 for module in libc.prx libSceFios2.prx; do
-  if [ ! -f "$MODULE_DIR/$module" ]; then
-    echo "ERROR: falta el módulo requerido de OpenOrbis: $MODULE_DIR/$module" >&2
+  sample_module="$SAMPLE_DIR/sce_module/$module"
+  if [ -s "$sample_module" ]; then
+    cp "$sample_module" "$STAGE/sce_module/$module"
+  elif [ -s "$MODULE_DIR/$module" ]; then
+    cp "$MODULE_DIR/$module" "$STAGE/sce_module/$module"
+  else
+    echo "ERROR: falta el módulo requerido de OpenOrbis: $module (sample dir: $SAMPLE_DIR; SDK: $MODULE_DIR)" >&2
     exit 1
   fi
-  cp "$MODULE_DIR/$module" "$STAGE/sce_module/$module"
 done
-
-# right.prx is optional package metadata from the sample tree. Include it only
-# when supplied by the project or a full local SDK/sample installation.
-if [ -f "ps4/sce_sys/about/right.prx" ]; then
-  cp "ps4/sce_sys/about/right.prx" "$STAGE/sce_sys/about/right.prx"
-elif [ -f "$SDK/samples/SDL2/sce_sys/about/right.prx" ]; then
-  cp "$SDK/samples/SDL2/sce_sys/about/right.prx" "$STAGE/sce_sys/about/right.prx"
-fi
+echo "OpenOrbis rights/runtime files included:"
+ls -l "$STAGE/sce_sys/about/right.sprx" "$STAGE/sce_module/libc.prx" "$STAGE/sce_module/libSceFios2.prx"
 
 # Convert ELF to the executable format used by PS4 homebrew packages.
 (
@@ -69,7 +83,7 @@ file "$STAGE/eboot.bin" || true
 
 # GP4 must list every file placed in the application package.
 cd "$STAGE"
-for required in eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_module/libc.prx sce_module/libSceFios2.prx; do
+for required in eboot.bin sce_sys/param.sfo sce_sys/icon0.png sce_sys/about/right.sprx sce_module/libc.prx sce_module/libSceFios2.prx; do
   if [ ! -s "$required" ]; then
     echo "ERROR: falta un archivo obligatorio del paquete PS4: $required" >&2
     exit 1

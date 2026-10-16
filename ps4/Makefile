@@ -27,7 +27,7 @@ MGBA_SRCS := $(addprefix $(MGBA)/src/arm/,$(ARM_SRC)) \
   $(MGBA)/src/feature/thread-proxy.c $(MGBA)/src/feature/video-logger.c \
   third_party/version.c $(wildcard $(MGBA)/src/platform/posix/*.c) \
   $(MGBA)/src/util/vfs/vfs-dirent.c
-APP_SRCS := src/emu.c src/debug_log.c src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/app_logic.c src/app_ui.c src/main_sdl.c
+APP_SRCS := src/emu.c src/debug_log.c src/ps4_bootstrap.c src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/app_logic.c src/app_ui.c src/main_sdl.c
 SRCS := $(MGBA_SRCS) $(APP_SRCS)
 OBJS := $(patsubst %.c,$(OBJDIR)/%.o,$(SRCS))
 
@@ -45,7 +45,7 @@ CFLAGS := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -O2 -w -DPS4 -D
   -DM_CORE_GBA -DENABLE_VFS -DENABLE_DIRECTORIES -DENABLE_VFS_FD -DMINIMAL_CORE=2 -DMGBA_STANDALONE -DHAVE_STRDUP \
   -I$(SDK)/include -I$(SDK)/include/SDL2 -I$(MGBA)/include -I$(MGBA)/src -Isrc
 LDFLAGS := -m elf_x86_64 -pie --script $(SDK)/link.x --eh-frame-hdr -L$(SDK)/lib \
-  -lc -lkernel -lc++ -lSceUserService -lSceVideoOut -lSceAudioOut -lScePad -lSceSysmodule -lSceFreeType -lSDL2 -lm $(SDK)/lib/crt1.o
+  -lc -lkernel -lc++ -lSceUserService -lSceSystemService -lSceVideoOut -lSceAudioOut -lScePad -lSceSysmodule -lSceFreeType -lSDL2 -lm $(SDK)/lib/crt1.o
 
 .PHONY: all clean validate package
 all: validate $(BUILD)/SonicAdvanceTrilogy.elf package

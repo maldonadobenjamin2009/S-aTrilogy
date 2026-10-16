@@ -23,6 +23,9 @@
 #include "config.h"
 #include "png.h"
 #include "debug_log.h"
+#if defined(__ORBIS__) || defined(PS4)
+#include "ps4_bootstrap.h"
+#endif
 
 #if defined(_WIN32)
 #include <windows.h>
@@ -760,8 +763,10 @@ int APP_ENTRY(int argc, char** argv) {
 	open_debug_console();
 #endif
 #if defined(__ORBIS__) || defined(PS4)
-	/* /app0 es de solo lectura. Conserva el log y la configuración en almacenamiento escribible. */
-	(void) mkdir("/data/SonicAdvanceTrilogy", 0777);
+	/* Registrar incluso los fallos previos a SDL y cargar los módulos PS4 antes de usarlos. */
+	ps4_bootstrap_init();
+	int ps4_data_dir_rc = mkdir("/data/SonicAdvanceTrilogy", 0777);
+	ps4_bootstrap_log("main() entered; mkdir app data returned %d", ps4_data_dir_rc);
 #endif
 	debug_log_init();
 	debug_log_info("Inicio de Sonic Advance Trilogy (modo SDL)");
@@ -784,11 +789,20 @@ int APP_ENTRY(int argc, char** argv) {
 	}
 	debug_log_info("PS4: resolución de salida %dx%d", ps4_screen_w, ps4_screen_h);
 #endif
+#if defined(__ORBIS__) || defined(PS4)
+	ps4_bootstrap_log("SDL_Init starting");
+#endif
 	if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_TIMER | SDL_INIT_GAMECONTROLLER) != 0) {
 		debug_log_error("No se pudo iniciar SDL: %s", SDL_GetError());
+#if defined(__ORBIS__) || defined(PS4)
+		ps4_bootstrap_log("FATAL: SDL_Init failed: %s", SDL_GetError());
+#endif
 		debug_log_close();
 		return 1;
 	}
+#if defined(__ORBIS__) || defined(PS4)
+	ps4_bootstrap_log("SDL_Init succeeded; driver=%s", SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "(null)");
+#endif
 	char base[1024] = ".";
 #if defined(__EMSCRIPTEN__)
 	/* Assets empacados por Emscripten viven en /assets. Los ROMs importados
@@ -832,7 +846,16 @@ int APP_ENTRY(int argc, char** argv) {
 #else
 	P.win = SDL_CreateWindow("Sonic Advance Trilogy Launcher", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1280, 720, SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI);
 #endif
-	if (!P.win) { debug_log_error("No se pudo crear la ventana: %s", SDL_GetError()); SDL_Quit(); debug_log_close(); return 1; }
+	if (!P.win) {
+		debug_log_error("No se pudo crear la ventana: %s", SDL_GetError());
+#if defined(__ORBIS__) || defined(PS4)
+		ps4_bootstrap_log("FATAL: SDL_CreateWindow failed: %s", SDL_GetError());
+#endif
+		SDL_Quit(); debug_log_close(); return 1;
+	}
+#if defined(__ORBIS__) || defined(PS4)
+	ps4_bootstrap_log("SDL_CreateWindow succeeded");
+#endif
 #if defined(__ORBIS__) || defined(PS4)
 	int ps4_window_w = 0, ps4_window_h = 0;
 	SDL_GetWindowSize(P.win, &ps4_window_w, &ps4_window_h);
@@ -868,7 +891,16 @@ int APP_ENTRY(int argc, char** argv) {
 #endif
 		}
 	}
-	if (!P.ren) { debug_log_error("No se pudo crear el renderizador: %s", SDL_GetError()); SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1; }
+	if (!P.ren) {
+		debug_log_error("No se pudo crear el renderizador: %s", SDL_GetError());
+#if defined(__ORBIS__) || defined(PS4)
+		ps4_bootstrap_log("FATAL: SDL_CreateRenderer failed: %s", SDL_GetError());
+#endif
+		SDL_DestroyWindow(P.win); SDL_Quit(); debug_log_close(); return 1;
+	}
+#if defined(__ORBIS__) || defined(PS4)
+	ps4_bootstrap_log("SDL_CreateRenderer succeeded");
+#endif
 #if defined(__ORBIS__) || defined(PS4)
 	/* Prueba visible antes de cargar los assets (que pueden tardar por el reescalado).
 	 * Si esto tampoco aparece, el problema está en la salida SDL/renderer, no en mGBA. */
@@ -892,8 +924,14 @@ int APP_ENTRY(int argc, char** argv) {
 	P.tex_game3_smooth = make_tex(SDL_PIXELFORMAT_ABGR8888, EMU_W, EMU_H, 1, SDL_BLENDMODE_NONE);
 	if (!P.tex_ui || !P.tex_game_sharp || !P.tex_game_smooth || !P.tex_game2_sharp || !P.tex_game2_smooth || !P.tex_game3_sharp || !P.tex_game3_smooth) {
 		debug_log_error("No se pudieron crear las texturas de 3 jugadores: %s", SDL_GetError());
+#if defined(__ORBIS__) || defined(PS4)
+		ps4_bootstrap_log("FATAL: texture allocation failed: %s", SDL_GetError());
+#endif
 		return 1;
 	}
+#if defined(__ORBIS__) || defined(PS4)
+	ps4_bootstrap_log("all UI/GBA textures allocated");
+#endif
 #if defined(__ORBIS__) || defined(PS4)
 	debug_log_info("PS4: texturas principales creadas correctamente (UI=%dx%d, GBA=%dx%d)", UI_W, UI_H, EMU_W, EMU_H);
 #endif
@@ -953,11 +991,19 @@ int APP_ENTRY(int argc, char** argv) {
 
 #if defined(__ORBIS__) || defined(PS4)
 	debug_log_info("PS4: entrando en app_create; puede tardar procesando carátulas");
+	ps4_bootstrap_log("app_create starting; resource base=%s", base);
 #endif
 	App* app = app_create(base, &host);
-	if (!app) { debug_log_error("No se pudo iniciar el launcher: app_create devolvió NULL"); if (P.audio) SDL_CloseAudioDevice(P.audio); SDL_Quit(); debug_log_close(); return 1; }
+	if (!app) {
+		debug_log_error("No se pudo iniciar el launcher: app_create devolvió NULL");
+#if defined(__ORBIS__) || defined(PS4)
+		ps4_bootstrap_log("FATAL: app_create returned NULL");
+#endif
+		if (P.audio) SDL_CloseAudioDevice(P.audio); SDL_Quit(); debug_log_close(); return 1;
+	}
 #if defined(__ORBIS__) || defined(PS4)
 	debug_log_info("PS4: app_create terminó; se inicia el bucle de renderizado");
+	ps4_bootstrap_log("app_create succeeded; entering frame loop");
 #endif
 	send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count());
 
@@ -1008,6 +1054,7 @@ int APP_ENTRY(int argc, char** argv) {
 		app_render(app, &frame);
 		present(app, &frame);
 #if defined(__ORBIS__) || defined(PS4)
+		ps4_bootstrap_note_frame();
 		ps4_frame_count++;
 		Uint32 fps_elapsed = (Uint32) (SDL_GetTicks() - ps4_fps_start);
 		if (fps_elapsed >= 5000) {
