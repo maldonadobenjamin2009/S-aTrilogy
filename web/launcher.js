@@ -4,7 +4,8 @@
   const romNames = [
     'sonicadvance.gba',
     'sonicadvance2.gba',
-    'sonicadvance3.gba'
+    'sonicadvance3.gba',
+    'sonicbattle.gba'
   ];
   const status = document.getElementById('status');
   const startButton = document.getElementById('start-app');
