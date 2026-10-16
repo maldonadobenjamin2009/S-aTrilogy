@@ -909,6 +909,10 @@ static void mouse_click(App* a, int x, int y) {
 	}
 	if (a->capture_kind >= 0) { a->capture_kind = -1; return; }
 	if (a->state == ST_MAIN) {
+		if (rect_has(ui_battle_slot_rect(), x, y)) {
+			app_toast(a, "Sonic Battle: espacio reservado para integrar el juego.");
+			return;
+		}
 		for (int i = 0; i < NUM_GAMES; i++) if (rect_has(ui_card_rect(a, i), x, y)) {
 			int was = (a->sel == i && a->zone == 0);
 			a->sel = i; a->zone = 0;
