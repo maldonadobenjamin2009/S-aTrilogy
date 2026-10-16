@@ -14,6 +14,7 @@ void emu_enable_debug_logging(void);
 Emu* emu_open(const char* rom_path, const char* save_path, const char* bios_path, unsigned audio_rate);
 /* Abre dos núcleos de la misma ROM conectados al cable link de mGBA. J1 es la instancia devuelta por emu_close; J2 se devuelve en secondary_out. */
 Emu* emu_open_linked_pair(const char* rom_path, const char* save_path, const char* save_path2, const char* bios_path, unsigned audio_rate, Emu** secondary_out);
+Emu* emu_open_linked_trio(const char* rom_path, const char* save_path, const char* save_path2, const char* save_path3, const char* bios_path, unsigned audio_rate, Emu** secondary_out, Emu** tertiary_out);
 void emu_close(Emu* e);
 void emu_reset(Emu* e);
 void emu_set_paused(Emu* e, int paused); /* pausa/reanuda ambos núcleos enlazados */

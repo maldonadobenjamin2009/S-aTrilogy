@@ -49,7 +49,8 @@ typedef struct {
 	int in_game;               /* 1: hay que dibujar 'game' (240x160) */
 	const uint32_t* game;      /* bytes R,G,B,X por píxel: jugador 1 */
 	const uint32_t* game2;     /* jugador 2, o NULL */
-	int multiplayer;           /* 1: mostrar game y game2 en dos mitades */
+	const uint32_t* game3;     /* jugador 3, exclusivo de Sonic Battle */
+	int multiplayer;           /* 0=solo, 1=dos mitades, 2=tres paneles triangulares */
 	int smooth, integer_scale;
 	const Canvas* ui;          /* interfaz 1920x1080; en juego es una capa con transparencia. Puede ser NULL */
 } AppFrame;

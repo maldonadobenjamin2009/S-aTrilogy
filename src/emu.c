@@ -54,6 +54,7 @@ struct Emu {
 
 	/* Solo se usa en modo enlazado. La instancia primaria es propietaria del peer. */
 	struct Emu* peer;
+	struct Emu* peer2; /* tercer núcleo; propiedad exclusiva del primario */
 	struct LinkSession* link;
 	struct mCoreThread thread;
 	struct mLockstepThreadUser lockstepUser;
@@ -65,6 +66,7 @@ struct Emu {
 
 struct LinkSession {
 	struct GBASIOLockstepCoordinator coordinator;
+	int count; /* 2 o 3 núcleos conectados */
 };
 
 const char* emu_version(void) {
@@ -270,144 +272,129 @@ static void emu_process_audio(Emu* emu) {
 	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
 }
 
+static void destroy_emu_member(Emu* emu) {
+	if (!emu) return;
+	if (emu->audioReady) {
+		mAudioResamplerDeinit(&emu->resampler);
+		mAudioBufferDeinit(&emu->out);
+		emu->audioReady = 0;
+	}
+	if (emu->core) {
+		mCoreConfigDeinit(&emu->core->config);
+		emu->core->unloadROM(emu->core);
+		emu->core->deinit(emu->core);
+		emu->core = NULL;
+	}
+	if (emu->audioMutexReady) MutexDeinit(&emu->audioMutex);
+	if (emu->frameMutexReady) MutexDeinit(&emu->frameMutex);
+	free(emu);
+}
+
 static void close_linked(Emu* primary) {
 	if (!primary) return;
-	Emu* secondary = primary->peer;
 	struct LinkSession* link = primary->link;
-	if (secondary && link) {
-		/* End también libera a los hilos que estén esperando al frontend en VBlank.
-		 * Es importante finalizar ambos antes de quitar drivers de cable link. */
-		if (primary->threadStarted) mCoreThreadEnd(&primary->thread);
-		if (secondary->threadStarted) mCoreThreadEnd(&secondary->thread);
-		if (primary->threadStarted) mCoreThreadJoin(&primary->thread);
-		if (secondary->threadStarted) mCoreThreadJoin(&secondary->thread);
-		if (primary->driverAttached) {
-			primary->core->setPeripheral(primary->core, mPERIPH_GBA_LINK_PORT, NULL);
-			GBASIOLockstepCoordinatorDetach(&link->coordinator, &primary->linkDriver);
-			primary->driverAttached = 0;
-		}
-		if (secondary->driverAttached) {
-			secondary->core->setPeripheral(secondary->core, mPERIPH_GBA_LINK_PORT, NULL);
-			GBASIOLockstepCoordinatorDetach(&link->coordinator, &secondary->linkDriver);
-			secondary->driverAttached = 0;
+	Emu* members[3] = {primary, primary->peer, primary->peer2};
+	int count = link && link->count >= 2 && link->count <= 3 ? link->count : (primary->peer2 ? 3 : (primary->peer ? 2 : 1));
+	if (link) {
+		/* Detener todos antes de desconectar cualquier driver: otro jugador puede
+		 * estar esperando su confirmación dentro del coordinador de mGBA. */
+		for (int i = 0; i < count; i++)
+			if (members[i] && members[i]->threadStarted) mCoreThreadEnd(&members[i]->thread);
+		for (int i = 0; i < count; i++)
+			if (members[i] && members[i]->threadStarted) mCoreThreadJoin(&members[i]->thread);
+		for (int i = 0; i < count; i++) {
+			Emu* e = members[i];
+			if (!e || !e->driverAttached || !e->core) continue;
+			e->core->setPeripheral(e->core, mPERIPH_GBA_LINK_PORT, NULL);
+			GBASIOLockstepCoordinatorDetach(&link->coordinator, &e->linkDriver);
+			e->driverAttached = 0;
 		}
 		GBASIOLockstepCoordinatorDeinit(&link->coordinator);
 		free(link);
-		primary->peer = NULL;
-		secondary->peer = NULL;
-		primary->link = NULL;
-		secondary->link = NULL;
-		if (secondary->audioReady) {
-			mAudioResamplerDeinit(&secondary->resampler);
-			mAudioBufferDeinit(&secondary->out);
-			secondary->audioReady = 0;
+		for (int i = 0; i < count; i++) {
+			if (!members[i]) continue;
+			members[i]->peer = NULL;
+			members[i]->peer2 = NULL;
+			members[i]->link = NULL;
 		}
-		if (secondary->core) {
-			mCoreConfigDeinit(&secondary->core->config);
-			secondary->core->unloadROM(secondary->core);
-			secondary->core->deinit(secondary->core);
-			secondary->core = NULL;
-		}
-		if (secondary->audioMutexReady) MutexDeinit(&secondary->audioMutex);
-		if (secondary->frameMutexReady) MutexDeinit(&secondary->frameMutex);
-		free(secondary);
 	}
-	if (primary->audioReady) {
-		mAudioResamplerDeinit(&primary->resampler);
-		mAudioBufferDeinit(&primary->out);
-		primary->audioReady = 0;
-	}
-	if (primary->core) {
-		mCoreConfigDeinit(&primary->core->config);
-		primary->core->unloadROM(primary->core);
-		primary->core->deinit(primary->core);
-		primary->core = NULL;
-	}
-	if (primary->audioMutexReady) MutexDeinit(&primary->audioMutex);
-	if (primary->frameMutexReady) MutexDeinit(&primary->frameMutex);
-	free(primary);
+	for (int i = count - 1; i >= 1; i--) destroy_emu_member(members[i]);
+	destroy_emu_member(primary);
 }
-Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
-                          const char* save_path2, const char* bios_path,
-                          unsigned out_rate, Emu** secondary_out) {
+
+static Emu* emu_open_linked(const char* rom_path, const char* const save_paths[3],
+                              const char* bios_path, unsigned out_rate, int count,
+                              Emu** secondary_out, Emu** tertiary_out) {
 	if (secondary_out) *secondary_out = NULL;
-	debug_log_info("Creando pareja mGBA con cable link para ROM: %s", rom_path ? rom_path : "(nula)");
-	Emu* first = emu_open_internal(rom_path, save_path, bios_path, out_rate, 0);
-	if (!first) { debug_log_error("Falló la inicialización de J1/cable link"); return NULL; }
-	Emu* second = emu_open_internal(rom_path, save_path2, bios_path, out_rate, 0);
-	if (!second) {
-		debug_log_error("Falló la inicialización de J2/cable link");
-		emu_close(first);
-		return NULL;
+	if (tertiary_out) *tertiary_out = NULL;
+	if (count < 2 || count > 3) return NULL;
+	debug_log_info("Creando enlace mGBA de %d jugadores para ROM: %s", count, rom_path ? rom_path : "(nula)");
+	Emu* members[3] = {NULL, NULL, NULL};
+	for (int i = 0; i < count; i++) {
+		members[i] = emu_open_internal(rom_path, save_paths[i], bios_path, out_rate, 0);
+		if (!members[i]) {
+			debug_log_error("Falló la inicialización del jugador %d/cable link", i + 1);
+			for (int j = 0; j < count; j++) if (members[j]) emu_close(members[j]);
+			return NULL;
+		}
 	}
 	struct LinkSession* link = calloc(1, sizeof(*link));
 	if (!link) {
 		debug_log_error("No hay memoria para crear la sesión de cable link");
-		emu_close(first);
-		emu_close(second);
+		for (int i = 0; i < count; i++) emu_close(members[i]);
 		return NULL;
 	}
 	GBASIOLockstepCoordinatorInit(&link->coordinator);
-	first->peer = second;
-	first->link = second->link = link;
-	first->playerId = 0;
-	second->playerId = 1;
-
-	/* Cada núcleo administra sus propios fotogramas en su hilo. Se desactiva la
-	 * barrera de vídeo del frontend (que serializaba J1 y J2); el callback copia
-	 * cada imagen y limita cada emulador a ~60 FPS de forma independiente.
-	 * El cable link conserva la sincronización de ciclos/eventos de SIO requerida
-	 * por mGBA, pero ya no sincroniza los fotogramas con la ventana. */
-	first->core->opts.videoSync = false;
-	first->core->opts.audioSync = false;
-	second->core->opts.videoSync = false;
-	second->core->opts.audioSync = false;
-
-	first->thread.core = first->core;
-	second->thread.core = second->core;
-	first->thread.userData = first;
-	second->thread.userData = second;
-	first->thread.frameCallback = linked_frame_callback;
-	second->thread.frameCallback = linked_frame_callback;
-	/* Route both worker loggers through the frontend sink. Without this, mGBA's
-	 * thread wrapper falls back to printf() for every lockstep DEBUG event. */
-	first->thread.logger.logger = &s_mgba_logger;
-	second->thread.logger.logger = &s_mgba_logger;
-	mLockstepThreadUserInit(&first->lockstepUser, &first->thread);
-	mLockstepThreadUserInit(&second->lockstepUser, &second->thread);
-	first->lockstepUser.d.sleep = safe_lockstep_sleep;
-	first->lockstepUser.d.wake = safe_lockstep_wake;
-	second->lockstepUser.d.sleep = safe_lockstep_sleep;
-	second->lockstepUser.d.wake = safe_lockstep_wake;
-	first->lockstepUser.d.requestedId = link_requested_id;
-	second->lockstepUser.d.requestedId = link_requested_id;
-	GBASIOLockstepDriverCreate(&first->linkDriver, &first->lockstepUser.d);
-	GBASIOLockstepDriverCreate(&second->linkDriver, &second->lockstepUser.d);
-	GBASIOLockstepCoordinatorAttach(&link->coordinator, &first->linkDriver);
-	GBASIOLockstepCoordinatorAttach(&link->coordinator, &second->linkDriver);
-	first->core->setPeripheral(first->core, mPERIPH_GBA_LINK_PORT, &first->linkDriver.d);
-	second->core->setPeripheral(second->core, mPERIPH_GBA_LINK_PORT, &second->linkDriver.d);
-	first->driverAttached = second->driverAttached = 1;
-
-	if (!mCoreThreadStart(&first->thread)) {
-		debug_log_error("mGBA no pudo iniciar el hilo de J1");
-		close_linked(first);
-		return NULL;
+	link->count = count;
+	members[0]->peer = members[1];
+	members[0]->peer2 = count == 3 ? members[2] : NULL;
+	for (int i = 0; i < count; i++) {
+		Emu* e = members[i];
+		e->link = link;
+		e->playerId = i;
+		e->core->opts.videoSync = false;
+		e->core->opts.audioSync = false;
+		e->thread.core = e->core;
+		e->thread.userData = e;
+		e->thread.frameCallback = linked_frame_callback;
+		e->thread.logger.logger = &s_mgba_logger;
+		mLockstepThreadUserInit(&e->lockstepUser, &e->thread);
+		e->lockstepUser.d.sleep = safe_lockstep_sleep;
+		e->lockstepUser.d.wake = safe_lockstep_wake;
+		e->lockstepUser.d.requestedId = link_requested_id;
+		GBASIOLockstepDriverCreate(&e->linkDriver, &e->lockstepUser.d);
+		GBASIOLockstepCoordinatorAttach(&link->coordinator, &e->linkDriver);
+		e->core->setPeripheral(e->core, mPERIPH_GBA_LINK_PORT, &e->linkDriver.d);
+		e->driverAttached = 1;
 	}
-	first->threadStarted = 1;
-	if (!mCoreThreadStart(&second->thread)) {
-		debug_log_error("mGBA no pudo iniciar el hilo de J2");
-		close_linked(first);
-		return NULL;
+	for (int i = 0; i < count; i++) {
+		if (!mCoreThreadStart(&members[i]->thread)) {
+			debug_log_error("mGBA no pudo iniciar el hilo del jugador %d", i + 1);
+			close_linked(members[0]);
+			return NULL;
+		}
+		members[i]->threadStarted = 1;
 	}
-	second->threadStarted = 1;
-	/* Los snapshots se actualizan desde los callbacks de cada hilo; el frontend no
-	 * debe establecer una barrera por VBlank entre los dos núcleos. */
-	if (secondary_out) *secondary_out = second;
-	debug_log_info("Cable link listo: J1 izquierda, J2 derecha; pacing de vídeo independiente; audio de J1 prioritario");
-	return first;
+	if (secondary_out) *secondary_out = members[1];
+	if (tertiary_out && count == 3) *tertiary_out = members[2];
+	debug_log_info("Cable link listo: %d jugadores, audio de J1 prioritario y pacing independiente", count);
+	return members[0];
 }
 
+Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
+                          const char* save_path2, const char* bios_path,
+                          unsigned out_rate, Emu** secondary_out) {
+	const char* saves[3] = {save_path, save_path2, NULL};
+	return emu_open_linked(rom_path, saves, bios_path, out_rate, 2, secondary_out, NULL);
+}
+
+Emu* emu_open_linked_trio(const char* rom_path, const char* save_path,
+                          const char* save_path2, const char* save_path3,
+                          const char* bios_path, unsigned out_rate,
+                          Emu** secondary_out, Emu** tertiary_out) {
+	const char* saves[3] = {save_path, save_path2, save_path3};
+	return emu_open_linked(rom_path, saves, bios_path, out_rate, 3, secondary_out, tertiary_out);
+}
 
 void emu_close(Emu* emu) {
 	if (!emu) return;
@@ -436,37 +423,35 @@ void emu_close(Emu* emu) {
 }
 
 void emu_set_paused(Emu* emu, int paused) {
-	if (!emu || !emu->peer || !emu->link || !emu->thread.impl || !emu->peer->thread.impl) return;
-	Emu* second = emu->peer;
+	if (!emu || !emu->link) return;
+	Emu* members[3] = {emu, emu->peer, emu->peer2};
+	int count = emu->link->count;
+	if (count < 2 || count > 3) return;
 	if (paused) {
-		mCoreThreadPauseFromThread(&emu->thread);
-		mCoreThreadPauseFromThread(&second->thread);
-		mCoreThreadPause(&emu->thread);
-		mCoreThreadPause(&second->thread);
+		for (int i = 0; i < count; i++) if (members[i] && members[i]->thread.impl)
+			mCoreThreadPauseFromThread(&members[i]->thread);
+		for (int i = 0; i < count; i++) if (members[i] && members[i]->thread.impl)
+			mCoreThreadPause(&members[i]->thread);
 	} else {
-		mCoreThreadUnpause(&emu->thread);
-		mCoreThreadUnpause(&second->thread);
+		for (int i = 0; i < count; i++) if (members[i] && members[i]->thread.impl)
+			mCoreThreadUnpause(&members[i]->thread);
 	}
 }
 
 void emu_reset(Emu* emu) {
-	if (!emu) return;
-	int linked = emu->peer && emu->link;
-	if (linked) {
-		mCoreThreadReset(&emu->thread);
-		mCoreThreadReset(&emu->peer->thread);
-	} else {
-		emu->core->reset(emu->core);
-	}
-	if (emu->audioMutexReady) MutexLock(&emu->audioMutex);
-	mAudioBufferClear(&emu->out);
-	/* En pareja el buffer fuente pertenece al worker: no tocarlo desde el hilo UI. */
-	if (!linked) mAudioBufferClear(emu->core->getAudioBuffer(emu->core));
-	if (emu->audioMutexReady) MutexUnlock(&emu->audioMutex);
-	if (emu->peer) {
-		if (emu->peer->audioMutexReady) MutexLock(&emu->peer->audioMutex);
-		mAudioBufferClear(&emu->peer->out);
-		if (emu->peer->audioMutexReady) MutexUnlock(&emu->peer->audioMutex);
+	if (!emu || !emu->core) return;
+	Emu* members[3] = {emu, emu->peer, emu->peer2};
+	int linked = emu->link && emu->link->count >= 2;
+	int count = linked ? emu->link->count : 1;
+	for (int i = 0; i < count; i++) {
+		Emu* e = members[i];
+		if (!e) continue;
+		if (linked) mCoreThreadReset(&e->thread);
+		else e->core->reset(e->core);
+		if (e->audioMutexReady) MutexLock(&e->audioMutex);
+		mAudioBufferClear(&e->out);
+		if (!linked) mAudioBufferClear(e->core->getAudioBuffer(e->core));
+		if (e->audioMutexReady) MutexUnlock(&e->audioMutex);
 	}
 }
 
@@ -476,18 +461,12 @@ void emu_set_keys(Emu* emu, uint32_t keys) {
 
 void emu_run_frame(Emu* emu) {
 	if (!emu || !emu->core) return;
-	if (emu->peer && emu->link) {
-		Emu* second = emu->peer;
-		/* Poll no bloqueante: el callback de cada hilo ya actualizó su snapshot
-		 * al terminar el fotograma. Limpiamos el contador interno de mGBA, sin
-		 * esperar a J1 antes de permitir que J2 siga avanzando (o viceversa). */
-		if (emu->thread.impl) {
-			struct mCoreSync* sync = &emu->thread.impl->sync;
-			(void) mCoreSyncWaitFrameStart(sync);
-			mCoreSyncWaitFrameEnd(sync);
-		}
-		if (second->thread.impl) {
-			struct mCoreSync* sync = &second->thread.impl->sync;
+	if (emu->link && emu->link->count >= 2) {
+		Emu* members[3] = {emu, emu->peer, emu->peer2};
+		for (int i = 0; i < emu->link->count; i++) {
+			Emu* e = members[i];
+			if (!e || !e->thread.impl) continue;
+			struct mCoreSync* sync = &e->thread.impl->sync;
 			(void) mCoreSyncWaitFrameStart(sync);
 			mCoreSyncWaitFrameEnd(sync);
 		}
@@ -549,31 +528,39 @@ static int load_state_one(Emu* emu, const char* path) {
 	if (ok) mAudioBufferClear(&emu->out);
 	return ok ? 1 : 0;
 }
-static void peer_state_path(const char* path, char* out, size_t size) {
-	snprintf(out, size, "%s.p2", path);
+static void linked_state_path(const char* path, int player, char* out, size_t size) {
+	if (player == 0) snprintf(out, size, "%s", path);
+	else snprintf(out, size, "%s.p%d", path, player + 1);
 }
 int emu_save_state(Emu* emu, const char* path) {
-	if (!emu || !path) return 0;
-	if (!save_state_one(emu, path)) return 0;
-	if (emu->peer) {
-		char p2[1200]; peer_state_path(path, p2, sizeof(p2));
-		return save_state_one(emu->peer, p2);
+	if (!emu || !path || !save_state_one(emu, path)) return 0;
+	if (!emu->link || emu->link->count < 2) return 1;
+	Emu* members[3] = {emu, emu->peer, emu->peer2};
+	for (int i = 1; i < emu->link->count; i++) {
+		char peerPath[1200];
+		linked_state_path(path, i, peerPath, sizeof(peerPath));
+		if (!members[i] || !save_state_one(members[i], peerPath)) return 0;
 	}
 	return 1;
 }
 int emu_load_state(Emu* emu, const char* path) {
 	if (!emu || !path) return 0;
-	if (emu->peer) {
-		char p2[1200]; peer_state_path(path, p2, sizeof(p2));
-		/* Comprobar los dos archivos antes de mutar el estado de ninguna CPU. */
-		struct VFile* vf2 = VFileOpen(p2, O_RDONLY);
-		if (!vf2) return 0;
-		vf2->close(vf2);
-		if (!load_state_one(emu, path)) return 0;
-		if (!load_state_one(emu->peer, p2)) return 0;
-		mAudioBufferClear(&emu->peer->out);
-		mAudioBufferClear(emu->peer->core->getAudioBuffer(emu->peer->core));
-		return 1;
+	if (!emu->link || emu->link->count < 2) return load_state_one(emu, path);
+	Emu* members[3] = {emu, emu->peer, emu->peer2};
+	char paths[3][1200];
+	for (int i = 0; i < emu->link->count; i++) {
+		linked_state_path(path, i, paths[i], sizeof(paths[i]));
+		struct VFile* vf = VFileOpen(paths[i], O_RDONLY);
+		if (!vf) return 0;
+		vf->close(vf);
 	}
-	return load_state_one(emu, path);
+	for (int i = 0; i < emu->link->count; i++) {
+		if (!members[i] || !load_state_one(members[i], paths[i])) return 0;
+		mAudioBufferClear(&members[i]->out);
+		if (members[i]->audioMutexReady) MutexLock(&members[i]->audioMutex);
+		mAudioBufferClear(members[i]->core->getAudioBuffer(members[i]->core));
+		if (members[i]->audioMutexReady) MutexUnlock(&members[i]->audioMutex);
+	}
+	return 1;
 }
+

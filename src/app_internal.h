@@ -57,9 +57,10 @@ struct App {
 	pthread_t web_launch_thread;
 	atomic_int web_launch_done;
 	int web_launch_active, web_launch_ok, web_launch_game;
-	Emu* web_launch_emu; Emu* web_launch_emu2;
+	Emu* web_launch_emu; Emu* web_launch_emu2; Emu* web_launch_emu3;
+	int web_launch_players;
 	char web_launch_rom[PATH_MAX_APP], web_launch_save[PATH_MAX_APP];
-	char web_launch_save2[PATH_MAX_APP], web_launch_bios[PATH_MAX_APP];
+	char web_launch_save2[PATH_MAX_APP], web_launch_save3[PATH_MAX_APP], web_launch_bios[PATH_MAX_APP];
 	unsigned web_launch_audio_rate;
 #endif
 	float anim[NUM_GAMES];
@@ -74,11 +75,13 @@ struct App {
 	int pad_count;
 	int p2_pad_down[MAXSET], p2_npad, p2_stick_down[4], p2_nstick;
 	float p2_stick[2]; int p2_trig[2];
+	int p3_pad_down[MAXSET], p3_npad, p3_stick_down[4], p3_nstick;
+	float p3_stick[2]; int p3_trig[2];
 	int touch_down[ACT_COUNT];       /* botones virtuales Android en términos de acción GBA */
 
 	/* juego */
-	Emu* emu; Emu* emu2; int game_idx;
-	uint32_t frame[EMU_W * EMU_H], frame2[EMU_W * EMU_H]; int have_frame;
+	Emu* emu; Emu* emu2; Emu* emu3; int game_idx;
+	uint32_t frame[EMU_W * EMU_H], frame2[EMU_W * EMU_H], frame3[EMU_W * EMU_H]; int have_frame;
 	int16_t audio[16384 * 2]; int audio_frames; int16_t audio_out[16384 * 2];
 	int audio_reset; int turbo;
 	double audio_ratio;              /* ajuste suave de la frecuencia de audio */
