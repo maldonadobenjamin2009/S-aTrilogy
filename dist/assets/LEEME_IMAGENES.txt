@@ -10,4 +10,7 @@ assets/games/sonicadvance2.png  Imagen ancha de Sonic Advance 2
 assets/games/sonicadvance3.png  Imagen ancha de Sonic Advance 3
     -> Recomendado 16:9 (1280x720). Se recorta al centro para la tarjeta (560x315)
        y se usa difuminada como fondo del juego seleccionado.
+assets/games/sonicbattle.png    (opcional) arte para el espacio reservado de Sonic Battle
+    -> Recomendado 16:9 (1280x720). Si no está, se muestra un panel gráfico de reserva.
+       Sonic Battle es por ahora un espacio visual; todavía no se incorpora como ROM jugable.
 assets/background.png           (opcional) fondo general 1920x1080
