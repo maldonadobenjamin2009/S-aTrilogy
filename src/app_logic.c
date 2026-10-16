@@ -35,6 +35,12 @@ const GameInfo GAMES[NUM_GAMES] = {
 	 "Sonic, Tails, Knuckles, Amy y Cream, y cada pareja ofrece movimientos y habilidades distintos. Recorre zonas temáticas "
 	 "desde el centro de Route 99, encuentra las Esmeraldas del Caos y frena de nuevo los planes del Dr. Eggman.",
 	 0xFFEB465A},
+	{"sb", "Sonic Battle", "sonicbattle.gba", "sonicbattle", "2003/04",
+	 "Combates rápidos en el universo Sonic", "Dimps", "Sega", "Lucha / acción 2D",
+	 "Sonic Battle lleva a Sonic y sus amigos a combates en arenas tridimensionales vistas desde una perspectiva isométrica. "
+	 "Domina golpes, bloqueos, esquivas y técnicas especiales, mejora las habilidades de tu personaje y descubre la historia "
+	 "de Emerl, un robot antiguo capaz de aprender los movimientos de sus rivales.",
+	 0xFF4C92FF},
 };
 
 const SettingItem SETTINGS[SET_COUNT] = {
@@ -48,8 +54,9 @@ const char* const PAUSE_LABELS[PAUSE_COUNT] = {
 
 static const char* NAMES_TXT =
 	"NOMBRES QUE DEBEN TENER LAS ROMS\n================================\n\n"
-	"Pon tus ROMs de Sonic Advance (copias de tus propios cartuchos) en ESTA carpeta\n(main/roms) y renombralas EXACTAMENTE asi:\n\n"
-	"    Sonic Advance     ->  sonicadvance.gba\n    Sonic Advance 2   ->  sonicadvance2.gba\n    Sonic Advance 3   ->  sonicadvance3.gba\n\n"
+	"Pon copias de tus propios juegos de GBA en ESTA carpeta (main/roms) con estos nombres:\n\n"
+	"    Sonic Advance     ->  sonicadvance.gba\n    Sonic Advance 2   ->  sonicadvance2.gba\n    Sonic Advance 3   ->  sonicadvance3.gba\n"
+	"    Sonic Battle     ->  sonicbattle.gba\n\n"
 	"Los juegos cuya ROM no este en esta carpeta apareceran oscurecidos en el launcher.\n"
 	"Si anades una ROM con el launcher abierto, se detecta sola en un segundo.\n";
 static const char* BIOS_TXT =
