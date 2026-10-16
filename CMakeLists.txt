@@ -66,7 +66,9 @@ elseif(EMSCRIPTEN)
   target_compile_definitions(emu_core PRIVATE USE_PTHREADS _GNU_SOURCE HAVE_LOCALE)
   target_compile_options(emu_core PRIVATE -pthread)
 elseif(APPLE)
-  target_compile_definitions(emu_core PRIVATE USE_PTHREADS _DARWIN_C_SOURCE HAVE_LOCALE HAVE_XLOCALE HAVE_SNPRINTF_L HAVE_STRTOF_L)
+  # macOS ya declara strlcpy y el SDK puede envolverla en una macro fortificada; evita redeclarar
+  # la API del sistema ni compilar el fallback POSIX incluido en mGBA.
+  target_compile_definitions(emu_core PRIVATE USE_PTHREADS _DARWIN_C_SOURCE HAVE_LOCALE HAVE_XLOCALE HAVE_SNPRINTF_L HAVE_STRTOF_L HAVE_STRLCPY)
   find_package(Threads REQUIRED)
   target_link_libraries(emu_core PUBLIC Threads::Threads)
 elseif(ANDROID)
