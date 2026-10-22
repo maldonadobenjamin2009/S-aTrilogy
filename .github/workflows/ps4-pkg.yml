@@ -1,4 +1,5 @@
 name: PS4 PKG (OpenOrbis homebrew)
+# This pipeline intentionally supports ROM-free repositories; users supply their own ROMs on-console.
 
 on:
   workflow_dispatch:
