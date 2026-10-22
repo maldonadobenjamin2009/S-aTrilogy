@@ -19,8 +19,13 @@ static const char* APP_TITLE = "SONIC ADVANCE TRILOGY";
 static const char* APP_VERSION = "2.0.0";
 
 /* ------------------------------------------------------------------ geometría */
-Rect ui_card_rect(const App* a, int i) { (void) a; return rect_make(60 + i * 620, 205, 560, 315); }
-Rect ui_battle_slot_rect(void) { return rect_make(60, 555, 540, 370); }
+Rect ui_card_rect(const App* a, int i) {
+	(void) a;
+	/* Advance 1/2/3 stay on the top row; Battle is below Advance 1. */
+	if (i == 3) return rect_make(60, 555, 560, 315);
+	return rect_make(60 + i * 620, 205, 560, 315);
+}
+Rect ui_battle_slot_rect(void) { return rect_make(60, 555, 560, 315); }
 Rect ui_btn_rect(int j) {
 	static const int w[4] = {360, 330, 260, 200};
 	int x = 60;
@@ -89,27 +94,6 @@ static Canvas* make_placeholder(const GameInfo* g, int w, int h) {
 	return c;
 }
 
-static Canvas* make_battle_placeholder(int w, int h) {
-	Canvas* c = cv_new(w, h);
-	if (!c) return NULL;
-	for (int y = 0; y < h; y++) {
-		float t = y / (float) (h - 1);
-		int r = (int) (7 + 10 * t);
-		int g = (int) (14 + 18 * t);
-		int b = (int) (34 + 25 * t);
-		gfx_rect(c, rect_make(0, y, w, 1), RGB(r, g, b));
-	}
-	/* Ilustración abstracta para reservar el hueco sin depender de una ROM ni de arte externo. */
-	gfx_circle(c, w * 0.83f, h * 0.45f, h * 0.38f, ARGB(35, 35, 115, 245));
-	gfx_ring(c, w * 0.83f, h * 0.45f, h * 0.28f, 7, RGB(255, 181, 46));
-	gfx_line(c, w * 0.58f, 0, w * 0.43f, h, 5, ARGB(70, 255, 255, 255));
-	gfx_line(c, w * 0.69f, 0, w * 0.54f, h, 2, ARGB(45, 255, 255, 255));
-	/* El título y la etiqueta se dibujan en la franja inferior de la tarjeta,
-	 * dejando la ilustración de reserva limpia y sin texto duplicado. */
-	gfx_circle(c, w * 0.20f, h * 0.92f, h * 0.12f, ARGB(24, 255, 205, 65));
-	return c;
-}
-
 void ui_load_assets(App* a) {
 	Canvas* raw = load_png_named(a->assets_dir, "icon");
 	if (raw) { a->icon = cv_fit(raw, 100, 100); cv_free(raw); }
@@ -122,13 +106,6 @@ void ui_load_assets(App* a) {
 		Canvas* bg = cv_cover(raw, UI_W, UI_H);
 		cv_free(raw);
 		if (bg) { cv_shade(bg, 150); for (int i = 0; i < UI_W * UI_H; i++) bg->px[i] |= 0xFF000000u; cv_free(a->bg_base); a->bg_base = bg; }
-	}
-	Canvas* battle = load_png_named(a->games_art_dir, "sonicbattle");
-	if (battle) {
-		a->battle_slot = cv_cover(battle, 560, 315);
-		cv_free(battle);
-	} else {
-		a->battle_slot = make_battle_placeholder(560, 315);
 	}
 
 	for (int i = 0; i < NUM_GAMES; i++) {
@@ -170,7 +147,7 @@ void ui_load_assets(App* a) {
 }
 
 void ui_free_assets(App* a) {
-	cv_free(a->icon); cv_free(a->title); cv_free(a->bg_base); cv_free(a->battle_slot);
+	cv_free(a->icon); cv_free(a->title); cv_free(a->bg_base);
 	for (int i = 0; i < NUM_GAMES; i++) { cv_free(a->cards[i]); cv_free(a->cards_dark[i]); cv_free(a->backdrops[i]); }
 }
 
@@ -295,17 +272,23 @@ static void draw_header(App* a, Canvas* c) {
 
 static void draw_cards(App* a, Canvas* c) {
 	float pulse = 0.5f + 0.5f * sinf((float) a->now * 4.0f);
-	/* Tres carátulas en la fila superior; Sonic Battle tiene su propia tarjeta abajo. */
-	int order[3] = {0, 1, 2};
-	for (int i = 0; i < 3; i++)
-		for (int j = i + 1; j < 3; j++)
-			if (a->anim[order[j]] < a->anim[order[i]]) { int t = order[i]; order[i] = order[j]; order[j] = t; }
-	for (int k = 0; k < 3; k++) {
+	/* Sonic Battle uses the exact same card renderer as the three Advance games. */
+	int order[NUM_GAMES];
+	for (int i = 0; i < NUM_GAMES; i++) order[i] = i;
+	for (int i = 0; i < NUM_GAMES; i++) {
+		for (int j = i + 1; j < NUM_GAMES; j++) {
+			if (a->anim[order[j]] < a->anim[order[i]]) {
+				int t = order[i]; order[i] = order[j]; order[j] = t;
+			}
+		}
+	}
+	for (int k = 0; k < NUM_GAMES; k++) {
 		int i = order[k];
 		float an = a->anim[i] < 0 ? 0 : (a->anim[i] > 1 ? 1 : a->anim[i]);
 		const GameInfo* g = &GAMES[i];
 		int has = a->rom_found[i];
 		Canvas* base = has ? a->cards[i] : a->cards_dark[i];
+		if (!base) continue;
 		float scale = 1.0f + 0.07f * an;
 		Rect cr = ui_card_rect(a, i);
 		int w = (int) (base->w * scale), h = (int) (base->h * scale);
@@ -346,42 +329,11 @@ static int wrap_lines(const char* text, int size, int maxw, char lines[][256], i
 	return n;
 }
 
-static void draw_battle_slot(App* a, Canvas* c) {
-	Rect r = ui_battle_slot_rect();
-	int selected = a->sel == 3 && a->zone == 0;
-	int has_rom = a->rom_found[3];
-	float pulse = 0.5f + 0.5f * sinf((float) a->now * 4.0f);
-	uint32_t accent = GAMES[3].accent;
-	panel(c, r, ARGB(225, 7, 10, 24), 25,
-	      with_alpha(selected ? accent : ARGB(100, 255, 181, 46),
-	                 selected ? (int) (190 + 60 * pulse) : 100),
-	      selected ? 5 : 2);
-	if (selected) gfx_rrect_stroke(c, rect_inflate(r, 12, 12), 30,
-	                               4, with_alpha(accent, (int) (120 + 80 * pulse)));
-	Rect art = rect_make(r.x + 16, r.y + 15, r.w - 32, 286);
-	gfx_rrect(c, rect_inflate(art, 5, 5), 16, ARGB(210, 0, 0, 0));
-	if (a->battle_slot) gfx_blit_scaled(c, a->battle_slot, art, 255);
-	else {
-		panel(c, art, ARGB(255, 12, 22, 48), 14, ARGB(170, 80, 150, 255), 2);
-		T(c, "SONIC BATTLE", art.x + art.w / 2, art.y + art.h / 2,
-		  34, C_WHITE, TX_BOLD | TX_CENTER | TX_VMID);
-	}
-	Rect foot = rect_make(r.x + 15, r.y + 307, r.w - 30, 47);
-	panel(c, foot, ARGB(235, 13, 17, 32), 14,
-	      selected ? accent : ARGB(90, 255, 255, 255), selected ? 2 : 1);
-	T(c, "SONIC BATTLE", foot.x + 18, foot.y + foot.h / 2, 22,
-	  selected ? C_WHITE : RGB(255, 205, 75), TX_BOLD | TX_VMID);
-	T(c, has_rom ? "ROM LISTA" : "FALTA ROM",
-	  foot.x + foot.w - 18, foot.y + foot.h / 2, 17,
-	  has_rom ? C_GREEN : C_RED, TX_BOLD | TX_RIGHT | TX_VMID);
-}
-
 static void draw_detail(App* a, Canvas* c) {
 	const GameInfo* g = &GAMES[a->sel];
 	int has = a->rom_found[a->sel];
-	/* La ficha usa el área derecha; la tarjeta independiente de Sonic Battle
-	 * ocupa el sector inferior izquierdo. Ambos seleccionan el mismo estado de juego. */
-	Rect box = rect_make(625, 555, UI_W - 685, 370);
+	/* Reserve a gap for the selected card's scale/glow so both cards look consistent. */
+	Rect box = rect_make(670, 555, UI_W - 730, 370);
 	panel(c, box, ARGB(222, 8, 10, 22), 26, ARGB(55, 255, 255, 255), 2);
 	gfx_rrect(c, rect_make(box.x + 23, box.y + 25, 7, 68), 4, g->accent);
 	T(c, g->title, box.x + 43, box.y + 15, 50, C_WHITE, TX_BOLD);
@@ -659,7 +611,6 @@ void ui_draw(App* a) {
 	}
 	draw_header(a, c);
 	draw_cards(a, c);
-	draw_battle_slot(a, c);
 	draw_detail(a, c);
 	draw_buttons(a, c);
 	draw_toast(a, c, 1050);
