@@ -11,3 +11,9 @@ android/.idea/
 /build-ps4/
 /ht_work/
 *.pkg
+
+# Game ROM binaries are user-provided local files; never commit them.
+dist/main/roms/*.gba
+dist/main/roms/*.gbc
+dist/main/roms/*.gb
+!dist/main/roms/NOMBRES_DE_LAS_ROMS.txt

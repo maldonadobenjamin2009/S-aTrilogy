@@ -57,13 +57,18 @@ public final class SonicAdvanceActivity extends SDLActivity {
         File targetRoms = new File(appBase, "main/roms");
         File targetAssets = new File(appBase, "assets");
 
-        // Migrar primero ROMs del directorio anterior para preservar las del usuario.
+        // Crea la carpeta para que el usuario pueda copiar sus ROMs aquí.
+        if (!targetRoms.isDirectory() && !targetRoms.mkdirs() && !targetRoms.isDirectory()) {
+            Log.e(TAG, "No se pudo crear la carpeta de ROMs: " + targetRoms.getAbsolutePath());
+        }
+
+        // Migra ROMs que el usuario ya tenía guardadas en Android/data.
+        // Nunca empaquetamos ni copiamos ROMs del repositorio o del APK.
         if (legacyBase != null && !sameDirectory(legacyBase, appBase)) {
             copyMissingTree(new File(legacyBase, "main/roms"), targetRoms);
         }
 
-        // Los recursos incluidos en esta versión rellenan los archivos ausentes.
-        copyAssetTree("main/roms", targetRoms);
+        // El APK trae imágenes/iconos, pero no ROMs.
         copyAssetTree("assets", targetAssets);
 
         // Restaura assets personalizados que no venían en el APK anterior; no reemplaza

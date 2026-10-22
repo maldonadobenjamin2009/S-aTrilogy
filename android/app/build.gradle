@@ -8,7 +8,7 @@ plugins {
  * la descarga si se coloca manualmente SDL2 2.30.9 en android/SDL2/. */
 def sdlVersion = '2.30.9'
 def sdlDir = file("$projectDir/../SDL2")
-// Dist es la fuente de verdad para el contenido empaquetado: dist/main/roms y dist/assets.
+// Solo se distribuyen assets; las ROMs las aporta cada usuario en Android/obb/<paquete>/main/roms.
 def repositoryDist = file("$projectDir/../../dist")
 def generatedBundledAssets = file("$buildDir/generated/bundledAssets")
 def generatedLauncherIconRes = file("$buildDir/generated/launcherIconRes")
@@ -68,22 +68,11 @@ try {
 
 tasks.register('verifyBundledGameData') {
     group = 'verification'
-    description = 'Comprueba que dist contiene ROMs y assets que se empaquetarán en el APK.'
+    description = 'Comprueba que dist contiene las imágenes necesarias para el launcher.'
     doLast {
-        def romDir = new File(repositoryDist, 'main/roms')
         def artDir = new File(repositoryDist, 'assets')
-        if (!romDir.isDirectory()) {
-            throw new GradleException("No existe ${romDir}. Las ROMs deben estar en dist/main/roms.")
-        }
         if (!artDir.isDirectory()) {
             throw new GradleException("No existe ${artDir}. Los recursos deben estar en dist/assets.")
-        }
-        // El launcher enumera ROMs en el nivel directo de main/roms, no recursivamente.
-        def roms = (romDir.listFiles() ?: []).findAll { f ->
-            f.isFile() && f.length() > 1024L && ['.gba', '.gbc', '.gb'].any { ext -> f.name.toLowerCase(Locale.ROOT).endsWith(ext) }
-        }
-        if (roms.isEmpty()) {
-            throw new GradleException("No se encontraron ROMs válidas (>1 KiB, .gba/.gbc/.gb) en ${romDir}; comprueba que Git LFS descargó los binarios reales si corresponde.")
         }
         def art = fileTree(artDir).files.findAll { f ->
             f.isFile() && ['.png', '.jpg', '.jpeg', '.webp'].any { ext -> f.name.toLowerCase(Locale.ROOT).endsWith(ext) }
@@ -91,7 +80,7 @@ tasks.register('verifyBundledGameData') {
         if (art.isEmpty()) {
             throw new GradleException("No se encontraron imágenes en ${artDir}; los recursos deben estar incluidos en el repositorio.")
         }
-        logger.lifecycle("Contenido del APK: ${roms.size()} ROM(s) y ${art.size()} imagen(es) encontradas en dist/.")
+        logger.lifecycle("Contenido del APK: ${art.size()} imagen(es); las ROMs las aporta el usuario en Android/obb/com.sonicadvancetrilogy.launcher/main/roms.")
     }
 }
 
@@ -105,13 +94,12 @@ tasks.register('prepareLauncherIcon', Sync) {
     }
 }
 
-// Solo se copian las dos carpetas requeridas; no se empaqueta el resto de dist/.
+// El APK contiene los assets visuales, no juegos con copyright.
 tasks.register('prepareBundledGameData', Sync) {
     group = 'build'
-    description = 'Prepara las ROMs y los assets que se incluirán en el APK.'
+    description = 'Prepara únicamente los assets que se incluirán en el APK.'
     dependsOn tasks.named('verifyBundledGameData')
     into generatedBundledAssets
-    from(new File(repositoryDist, 'main/roms')) { into 'main/roms' }
     from(new File(repositoryDist, 'assets')) { into 'assets' }
 }
 
@@ -146,9 +134,8 @@ android {
     sourceSets {
         main {
             java.srcDirs += [file("$sdlDir/android-project/app/src/main/java")]
-            // Mantiene las rutas relativas main/roms/** y assets/** dentro del APK.
-            // SonicAdvanceActivity las copia al directorio
-            // privado de la aplicación antes de iniciar SDL/mGBA.
+            // Solo assets visuales dentro del APK; SonicAdvanceActivity copia las imágenes
+            // a OBB y deja main/roms vacío para que el usuario agregue sus propias ROMs.
             assets.srcDirs += [generatedBundledAssets]
             res.srcDirs += [generatedLauncherIconRes]
         }
