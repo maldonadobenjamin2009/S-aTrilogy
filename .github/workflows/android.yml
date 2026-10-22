@@ -3,7 +3,7 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, android/gamepad-hide-and-linkperf ]
 
 jobs:
   build-apk:
