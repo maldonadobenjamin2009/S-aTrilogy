@@ -3,7 +3,7 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master, android/gamepad-hide-and-linkperf, ui/battle-card-and-app-icon ]
+    branches: [ main, master, android/gamepad-hide-and-linkperf, ui/battle-card-and-app-icon, android/obb-content-storage ]
 
 jobs:
   build-apk:

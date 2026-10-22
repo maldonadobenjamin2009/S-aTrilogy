@@ -831,11 +831,12 @@ int APP_ENTRY(int argc, char** argv) {
 	 * desde la página se copian a /main/roms, que es la ruta del launcher nativo. */
 	snprintf(base, sizeof(base), ".");
 #elif defined(__ANDROID__)
-	/* Directorio privado de la app en almacenamiento externo: permite importar ROMs
-	 * sin pedir permisos globales de almacenamiento (Android 10+). */
-	const char* android_base = SDL_AndroidGetExternalStoragePath();
+	/* ROMs y carátulas en Android/obb/<paquete>; partidas/configuración en Android/data. */
+	const char* android_base = getenv("SAT_RESOURCE_BASE");
+	if (!android_base || !*android_base) android_base = SDL_AndroidGetExternalStoragePath();
 	if (!android_base || !*android_base) android_base = SDL_AndroidGetInternalStoragePath();
 	if (android_base && *android_base) snprintf(base, sizeof(base), "%s", android_base);
+	debug_log_info("Android: base de ROMs/assets = %s", base);
 #else
 	char* bp = SDL_GetBasePath();
 	if (bp) {
@@ -1007,6 +1008,10 @@ int APP_ENTRY(int argc, char** argv) {
 	/* IDBFS persistirá partidas y configuración sin cambiar la lógica del launcher. */
 	static char web_user_data_base[] = "/persistent";
 	host.user_data_dir = web_user_data_base;
+#elif defined(__ANDROID__)
+	/* Partidas/configuración permanecen bajo Android/data; solo ROMs y assets van a OBB. */
+	const char* android_user_data_base = getenv("SAT_USER_DATA_BASE");
+	if (android_user_data_base && *android_user_data_base) host.user_data_dir = android_user_data_base;
 #endif
 	for (int i = 0; i < SDL_NumJoysticks(); i++) open_pad(i);
 	debug_log_info("Mandos reconocidos al iniciar: %d", opened_pad_count());
