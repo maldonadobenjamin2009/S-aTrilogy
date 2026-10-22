@@ -11,6 +11,7 @@ def sdlDir = file("$projectDir/../SDL2")
 // Dist es la fuente de verdad para el contenido empaquetado: dist/main/roms y dist/assets.
 def repositoryDist = file("$projectDir/../../dist")
 def generatedBundledAssets = file("$buildDir/generated/bundledAssets")
+def generatedLauncherIconRes = file("$buildDir/generated/launcherIconRes")
 def sdlCmake = new File(sdlDir, 'CMakeLists.txt')
 def sdlJava = new File(sdlDir, 'android-project/app/src/main/java/org/libsdl/app/SDLActivity.java')
 
@@ -94,6 +95,16 @@ tasks.register('verifyBundledGameData') {
     }
 }
 
+tasks.register('prepareLauncherIcon', Sync) {
+    group = 'build'
+    description = 'Genera el icono instalado de Android desde dist/assets/icon.png.'
+    into generatedLauncherIconRes
+    from(new File(repositoryDist, 'assets/icon.png')) {
+        into 'mipmap-nodpi'
+        rename { 'ic_launcher.png' }
+    }
+}
+
 // Solo se copian las dos carpetas requeridas; no se empaqueta el resto de dist/.
 tasks.register('prepareBundledGameData', Sync) {
     group = 'build'
@@ -105,7 +116,9 @@ tasks.register('prepareBundledGameData', Sync) {
 }
 
 afterEvaluate {
-    tasks.named('preBuild').configure { dependsOn tasks.named('prepareBundledGameData') }
+    tasks.named('preBuild').configure {
+        dependsOn tasks.named('prepareBundledGameData'), tasks.named('prepareLauncherIcon')
+    }
 }
 
 android {
@@ -137,6 +150,7 @@ android {
             // SonicAdvanceActivity las copia al directorio
             // privado de la aplicación antes de iniciar SDL/mGBA.
             assets.srcDirs += [generatedBundledAssets]
+            res.srcDirs += [generatedLauncherIconRes]
         }
     }
 
