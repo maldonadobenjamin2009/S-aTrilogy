@@ -62,6 +62,9 @@ typedef struct {
 
 static Plat P;
 
+/* Also used before its implementation by Android touch handlers/rendering. */
+static int opened_pad_count(void);
+
 #if defined(_WIN32)
 static void open_debug_console(void) {
     if (!GetConsoleWindow()) {
@@ -282,7 +285,7 @@ static void touch_event_down(App* app, SDL_TouchFingerEvent* ev) {
 			return;
 		}
 	}
-	if (P.last_in_game && !app_touch_menu_active(app)) {
+	if (P.last_in_game && opened_pad_count() == 0 && !app_touch_menu_active(app)) {
 		TouchHit hit = touch_hit(app, (int)(ev->x * ow), (int)(ev->y * oh), ow, oh);
 		if (hit.kind == TOUCH_ACTION && hit.code == ACT_PAUSE) {
 			touch_release_all(app);
@@ -530,7 +533,10 @@ static void present(App* app, const AppFrame* f) {
 	}
 #if defined(__ANDROID__)
 	P.last_in_game = f->in_game;
-	if (f->in_game) {
+	/* Hide the complete virtual gamepad as soon as a usable physical controller
+	 * is connected. Controller count is queried directly so drawing reacts in
+	 * the same frame as a hot-plug, without waiting for a later app update. */
+	if (f->in_game && opened_pad_count() == 0) {
 		int paused = app_touch_menu_active(app);
 		ensure_touch_texture(ow, oh, paused);
 		if (P.tex_touch) SDL_RenderCopy(P.ren, P.tex_touch, NULL, NULL);
@@ -605,8 +611,24 @@ static void pump_events(App* app) {
 		case SDL_QUIT: send_app_event_j1(app, EV_QUIT, 0, 0); break;
 		case SDL_KEYDOWN: if (!e.key.repeat) send_app_event_j1(app, EV_KEY_DOWN, map_key(e.key.keysym.sym), (e.key.keysym.mod & KMOD_ALT) ? 1 : 0); break;
 		case SDL_KEYUP: send_app_event_j1(app, EV_KEY_UP, map_key(e.key.keysym.sym), 0); break;
-		case SDL_CONTROLLERDEVICEADDED: open_pad(e.cdevice.which); debug_log_info("Mando conectado; mandos reconocidos: %d", opened_pad_count()); send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count()); break;
-		case SDL_CONTROLLERDEVICEREMOVED: close_pad(e.cdevice.which); debug_log_info("Mando desconectado; mandos reconocidos: %d", opened_pad_count()); send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count()); break;
+		case SDL_CONTROLLERDEVICEADDED:
+			open_pad(e.cdevice.which);
+			debug_log_info("Mando conectado; mandos reconocidos: %d", opened_pad_count());
+			send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count());
+#if defined(__ANDROID__)
+			/* Release any virtual buttons held before hot-plugging a controller. */
+			if (opened_pad_count() > 0) touch_release_all(app);
+#endif
+			break;
+		case SDL_CONTROLLERDEVICEREMOVED:
+			close_pad(e.cdevice.which);
+			debug_log_info("Mando desconectado; mandos reconocidos: %d", opened_pad_count());
+			send_app_event_j1(app, EV_PAD_COUNT, 0, opened_pad_count());
+#if defined(__ANDROID__)
+			/* The touch controls may reappear; clear stale touch state either way. */
+			touch_release_all(app);
+#endif
+			break;
 		case SDL_CONTROLLERBUTTONDOWN: send_pad_event(app, EV_PAD_DOWN, e.cbutton.button, 0, e.cbutton.which); break;
 		case SDL_CONTROLLERBUTTONUP: send_pad_event(app, EV_PAD_UP, e.cbutton.button, 0, e.cbutton.which); break;
 		case SDL_CONTROLLERAXISMOTION: send_pad_event(app, EV_PAD_AXIS, e.caxis.axis, e.caxis.value, e.caxis.which); break;
