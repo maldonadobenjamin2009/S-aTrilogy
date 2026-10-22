@@ -91,7 +91,7 @@ struct App {
 	/* recursos */
 	Canvas *icon, *title, *bg_base, *ui;
 	Canvas *cards[NUM_GAMES], *cards_dark[NUM_GAMES], *backdrops[NUM_GAMES];
-	Canvas* battle_slot; /* tarjeta visual reservada para Sonic Battle */
+	
 };
 
 typedef struct { int kind; const char* label; int field; } SettingItem;   /* kind: 0 interruptor, 1 deslizador, 2 ir a, 3 acción, 4 volver */
