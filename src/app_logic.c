@@ -1178,7 +1178,10 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	char resource_main_dir[PATH_MAX_APP], data_main_dir[PATH_MAX_APP];
 	char bios_dir[PATH_MAX_APP], txt[PATH_MAX_APP + 40];
 	snprintf(resource_main_dir, sizeof(resource_main_dir), "%s/main", a->base);
-	snprintf(a->roms_dir, sizeof(a->roms_dir), "%s/roms", resource_main_dir);
+	if (host && host->user_roms_dir && host->user_roms_dir[0])
+		snprintf(a->roms_dir, sizeof(a->roms_dir), "%s", host->user_roms_dir);
+	else
+		snprintf(a->roms_dir, sizeof(a->roms_dir), "%s/roms", resource_main_dir);
 	snprintf(data_main_dir, sizeof(data_main_dir), "%s/main", data_base);
 	snprintf(a->saves_dir, sizeof(a->saves_dir), "%s/saves", data_main_dir);
 	snprintf(bios_dir, sizeof(bios_dir), "%s/bios", data_main_dir);

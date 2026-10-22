@@ -1003,7 +1003,9 @@ int APP_ENTRY(int argc, char** argv) {
 #if defined(__ORBIS__) || defined(PS4)
 	/* /app0 es contenido instalado y no debe usarse para partidas/configuración. */
 	static char ps4_user_data_base[] = "/data/SonicAdvanceTrilogy";
+	static char ps4_user_roms_dir[] = "/data/SonicAdvanceTrilogy/main/roms";
 	host.user_data_dir = ps4_user_data_base;
+	host.user_roms_dir = ps4_user_roms_dir;
 #elif defined(__EMSCRIPTEN__)
 	/* IDBFS persistirá partidas y configuración sin cambiar la lógica del launcher. */
 	static char web_user_data_base[] = "/persistent";

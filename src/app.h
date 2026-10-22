@@ -43,6 +43,7 @@ typedef struct {
 	const char* audio_info;
 	const char* video_info;
 	const char* user_data_dir; /* opcional: rutas escribibles para partidas/configuración; NULL usa base_dir */
+	const char* user_roms_dir; /* opcional: ROMs externas, separadas de los assets instalados */
 } AppHost;
 
 typedef struct {

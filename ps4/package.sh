@@ -14,8 +14,12 @@ CREATE_GP4="$TOOLS/create-gp4"
 
 rm -rf "$STAGE"
 mkdir -p "$STAGE/sce_sys/about" "$STAGE/sce_module" "$STAGE/main" "$STAGE/assets"
-# Pack all application data using the exact paths expected by app_create().
-cp -a dist/main/. "$STAGE/main/"
+# Pack application data while keeping game ROMs optional. Repository/CI builds
+# stay ROM-free; a local build may include the user's own copies if present.
+if [ -d dist/main ]; then
+  cp -a dist/main/. "$STAGE/main/"
+fi
+mkdir -p "$STAGE/main/roms"
 cp -a dist/assets/. "$STAGE/assets/"
 cp ps4/sce_sys/icon0.png "$STAGE/sce_sys/icon0.png"
 

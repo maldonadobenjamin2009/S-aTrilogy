@@ -54,9 +54,8 @@ validate:
 	@test -n "$(SDK)" && test -d "$(SDK)/include" || (echo "ERROR: OO_PS4_TOOLCHAIN no apunta a OpenOrbis"; exit 1)
 	@test -f "$(SDK)/lib/libSDL2.a" || test -f "$(SDK)/lib/libSDL2.so" || (echo "ERROR: falta SDL2 de OpenOrbis en $(SDK)/lib"; exit 1)
 	@test -x "$(CREATE_FSELF)" -a -x "$(CREATE_GP4)" -a -x "$(PKGTOOL)" || (echo "ERROR: faltan herramientas OpenOrbis en $(TOOL_DIR)"; exit 1)
-	@test -d dist/main/roms || (echo "ERROR: falta dist/main/roms"; exit 1)
 	@test -d dist/assets || (echo "ERROR: falta dist/assets"; exit 1)
-	@find dist/main/roms -type f \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) -print -quit | grep -q . || (echo "ERROR: no se encontraron ROMs .gba/.gbc/.gb rastreadas en Git"; exit 1)
+	@if [ -d dist/main/roms ] && find dist/main/roms -type f \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) -print -quit | grep -q .; then echo "Optional ROM files found for this build."; else echo "ROM-free package: no ROMs bundled; copy your own ROMs into /data/SonicAdvanceTrilogy/main/roms on the console."; fi
 	@echo "SDK: $(SDK)"
 
 $(OBJDIR)/%.o: %.c
