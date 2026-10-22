@@ -698,9 +698,14 @@ static void main_action(App* a, int act) {
 	if (act == A_NEXT) { if (a->sel < NUM_GAMES - 1) a->sel++; return; }
 	if (act == A_MENU) { open_settings(a); return; }
 	if (a->zone == 0) {
-		if (act == A_LEFT) { if (a->sel > 0) a->sel--; }
-		else if (act == A_RIGHT) { if (a->sel < NUM_GAMES - 1) a->sel++; }
-		else if (act == A_DOWN) { a->zone = 1; a->btn = 0; }
+		if (act == A_LEFT) { if (a->sel > 0 && a->sel < 3) a->sel--; }
+		else if (act == A_RIGHT) { if (a->sel < 2) a->sel++; }
+		else if (act == A_UP) { if (a->sel == 3) a->sel = 0; }
+		else if (act == A_DOWN) {
+			/* Battle is positioned directly below Advance 1. */
+			if (a->sel == 0) a->sel = 3;
+			else { a->zone = 1; a->btn = 0; }
+		}
 		else if (act == A_ACCEPT) a->pending_launch = a->sel;
 	} else {
 		if (act == A_LEFT) { if (a->btn > 0) a->btn--; }
