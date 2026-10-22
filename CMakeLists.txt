@@ -193,6 +193,25 @@ else()
   add_executable(SonicAdvanceTrilogy src/main_sdl.c)
   target_link_libraries(SonicAdvanceTrilogy PRIVATE launcher_core ${SDL_TARGET})
   if(WIN32)
+    # Use dist/assets/icon.png as the actual executable icon, not only the SDL window icon.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(APP_ICON_DIR "${CMAKE_CURRENT_BINARY_DIR}/generated_icon")
+    set(APP_ICON_ICO "${APP_ICON_DIR}/SonicAdvanceTrilogy.ico")
+    set(APP_ICON_RC "${APP_ICON_DIR}/app_icon.rc")
+    add_custom_command(
+      OUTPUT "${APP_ICON_ICO}" "${APP_ICON_RC}"
+      COMMAND "${CMAKE_COMMAND}" -E make_directory "${APP_ICON_DIR}"
+      COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/png_to_ico.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/dist/assets/icon.png"
+        "${APP_ICON_ICO}" "${APP_ICON_RC}"
+      DEPENDS
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/png_to_ico.py"
+        "${CMAKE_CURRENT_SOURCE_DIR}/dist/assets/icon.png"
+      VERBATIM
+    )
+    set_source_files_properties("${APP_ICON_RC}" PROPERTIES GENERATED TRUE)
+    target_sources(SonicAdvanceTrilogy PRIVATE "${APP_ICON_RC}")
     target_link_options(SonicAdvanceTrilogy PRIVATE -mwindows -static-libgcc)
   endif()
 endif()
