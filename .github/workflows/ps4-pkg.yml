@@ -3,7 +3,7 @@ name: PS4 PKG (OpenOrbis homebrew)
 on:
   workflow_dispatch:
   push:
-    branches: [ main, master ]
+    branches: [ main, master, fix/ps4-rom-free-build ]
     paths:
       - 'src/**'
       - 'third_party/**'
@@ -153,19 +153,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -d dist/main/roms
           test -d dist/assets
-          count=$(find dist/main/roms -type f \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) | wc -l)
+          if [ -d dist/main/roms ]; then
+            count=$(find dist/main/roms -type f \( -iname '*.gba' -o -iname '*.gbc' -o -iname '*.gb' \) | wc -l)
+          else
+            count=0
+          fi
           if [ "$count" -eq 0 ]; then
-            echo "::error::No tracked ROM files found under dist/main/roms. Ensure Git LFS assets are available to Actions."
-            exit 1
+            echo "::notice::No ROMs are bundled in this ROM-free repository; the PKG will contain the launcher and assets only."
+          else
+            echo "Optional ROM files found for this build: $count"
           fi
           test -f ps4/sce_sys/icon0.png
           test -s "$OO_PS4_SAMPLE_DIR/sce_sys/about/right.sprx"
           test -s "$OO_PS4_SAMPLE_DIR/sce_module/libc.prx"
           test -s "$OO_PS4_SAMPLE_DIR/sce_module/libSceFios2.prx"
           test -f "$OO_PS4_TOOLCHAIN/lib/libSDL2.a"
-          echo "ROMs included in package: $count"
+          echo "Optional ROMs found: $count"
           echo "OpenOrbis SDK: $OO_PS4_TOOLCHAIN"
 
       - name: Build PS4 ELF and PKG with OpenOrbis
