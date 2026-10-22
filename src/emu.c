@@ -352,6 +352,13 @@ static Emu* emu_open_linked(const char* rom_path, const char* const save_paths[3
 		Emu* e = members[i];
 		e->link = link;
 		e->playerId = i;
+#if defined(__ANDROID__)
+		/* Keep every CPU/GBA timing cycle, but render only every other frame
+		 * in linked Android sessions. Two full software renderers are a common
+		 * bottleneck on phones; mGBA's frameskip skips scanline drawing only. */
+		e->core->opts.frameskip = 1;
+		e->core->loadConfig(e->core, &e->core->config);
+#endif
 		e->core->opts.videoSync = false;
 		e->core->opts.audioSync = false;
 		e->thread.core = e->core;
@@ -367,6 +374,9 @@ static Emu* emu_open_linked(const char* rom_path, const char* const save_paths[3
 		e->core->setPeripheral(e->core, mPERIPH_GBA_LINK_PORT, &e->linkDriver.d);
 		e->driverAttached = 1;
 	}
+#if defined(__ANDROID__)
+	debug_log_info("Android: frameskip=1 para los %d núcleos enlazados; la simulación continúa a velocidad completa", count);
+#endif
 	for (int i = 0; i < count; i++) {
 		if (!mCoreThreadStart(&members[i]->thread)) {
 			debug_log_error("mGBA no pudo iniciar el hilo del jugador %d", i + 1);
