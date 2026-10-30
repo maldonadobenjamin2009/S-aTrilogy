@@ -38,7 +38,7 @@ El tráfico de juego **no está cifrado**. Usá esta función solo en una red lo
 
 ## Límites actuales y compatibilidad
 
-- Durante una partida LAN, la pausa local y los guardados/cargas rápidos se deshabilitan para evitar que un equipo avance o restaure un estado distinto al del otro.
+- Durante una partida LAN, la pausa local y los guardados/cargas rápidos se deshabilitan para evitar que un equipo avance o restaure un estado distinto al del otro. **Esc abandona la partida LAN** y notifica la desconexión al compañero; al cambiar de ventana no se pausa unilateralmente la simulación.
 - Si se pierde la conexión, la partida se cierra y el launcher vuelve al menú.
 - El modo individual y el multijugador local existente (incluidas las opciones locales de Sonic Battle) siguen disponibles.
 - LAN está disponible en las compilaciones nativas de escritorio y Android. La versión web y la compilación PS4 no exponen sockets LAN y conservan sus modos actuales.
