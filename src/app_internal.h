@@ -45,7 +45,7 @@ struct App {
 	int set_sel, controls_from_pause, ctrl_row, ctrl_col;
 	int lan_sel, lan_editing, lan_last_state;
 	char lan_ip[64], lan_password[LAN_PASSWORD_MAX + 1], lan_port_text[8];
-	unsigned lan_game_id; uint64_t lan_rom_signature;
+	unsigned lan_game_id; uint64_t lan_session_signature;
 	LanSession* lan;
 	int capture_kind, capture_act;   /* -1 ninguno, 0 teclado, 1 mando J1, 2 mando J2 */
 	int modal_kind, modal_choice, prompt_game; /* 1 = selector de modo 1J/2J */
