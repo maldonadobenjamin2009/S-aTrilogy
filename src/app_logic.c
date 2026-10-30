@@ -429,6 +429,7 @@ static void start_game_now(App* a, int i, int players) {
 		return;
 	}
 	activate_game(a, i);
+	if (lan_mode) app_toast(a, "Esperando al otro jugador: ambos deben iniciar el juego");
 }
 
 static void start_game(App* a, int i) {
