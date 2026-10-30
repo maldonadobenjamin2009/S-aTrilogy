@@ -4,7 +4,7 @@ El modo LAN conecta dos equipos de la misma red local mediante TCP y usa el cabl
 
 ## Preparación
 
-- Los dos equipos deben ejecutar una versión compatible del launcher y tener **el mismo título y exactamente la misma ROM**.
+- Los dos equipos deben ejecutar una versión compatible del launcher y tener **el mismo título, exactamente la misma ROM y los mismos datos iniciales de guardado**. Si el juego ya tiene archivos `.sav` o `.p2.sav`, copiá los mismos archivos a ambos equipos antes de iniciar.
 - El modo LAN admite una sala con un anfitrión y un jugador que se une (dos jugadores en total).
 - El puerto TCP predeterminado es **5738**. Se puede cambiar en **Ajustes → Multijugador LAN → Puerto TCP común**. El anfitrión y el invitado deben usar el mismo número.
 - La contraseña debe tener entre **8 y 63 caracteres ASCII**. No se guarda en el archivo de configuración.
