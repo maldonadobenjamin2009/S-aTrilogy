@@ -100,6 +100,8 @@ static void h_fullscreen(void* u, int on) { (void) u; P.fullscreen = on; SDL_Set
 static void h_title(void* u, const char* t) { (void) u; SDL_SetWindowTitle(P.win, t); }
 static void h_cursor(void* u, int v) { (void) u; SDL_ShowCursor(v ? SDL_ENABLE : SDL_DISABLE); }
 static const char* h_key_name(void* u, int code) { (void) u; return SDL_GetKeyName((SDL_Keycode) code); }
+static void h_start_text_input(void* u) { (void) u; SDL_StartTextInput(); }
+static void h_stop_text_input(void* u) { (void) u; SDL_StopTextInput(); }
 
 /* ------------------------------------------------------------------------- audio
  * Igual que el frontend SDL oficial de mGBA:
@@ -572,6 +574,12 @@ static void send_player(App* app, int type, int code, int value, int player) {
 	app_event(app, &e);
 }
 static void send_app_event_j1(App* app, int type, int code, int value) { send_player(app, type, code, value, 0); }
+static void send_text_input(App* app, const char* text) {
+	AppEvent ev = {0};
+	ev.type = EV_TEXT_INPUT;
+	if (text) snprintf(ev.text, sizeof(ev.text), "%s", text);
+	app_event(app, &ev);
+}
 static int opened_pad_count(void) {
 	int n = 0;
 	for (int i = 0; i < 16; i++) if (P.pads[i]) n++;
@@ -611,6 +619,7 @@ static void pump_events(App* app) {
 		case SDL_QUIT: send_app_event_j1(app, EV_QUIT, 0, 0); break;
 		case SDL_KEYDOWN: if (!e.key.repeat) send_app_event_j1(app, EV_KEY_DOWN, map_key(e.key.keysym.sym), (e.key.keysym.mod & KMOD_ALT) ? 1 : 0); break;
 		case SDL_KEYUP: send_app_event_j1(app, EV_KEY_UP, map_key(e.key.keysym.sym), 0); break;
+		case SDL_TEXTINPUT: send_text_input(app, e.text.text); break;
 		case SDL_CONTROLLERDEVICEADDED:
 			open_pad(e.cdevice.which);
 			debug_log_info("Mando conectado; mandos reconocidos: %d", opened_pad_count());
@@ -1000,6 +1009,7 @@ int APP_ENTRY(int argc, char** argv) {
 
 	host.open_folder = h_open_folder; host.set_fullscreen = h_fullscreen; host.set_title = h_title;
 	host.set_cursor_visible = h_cursor; host.key_name = h_key_name;
+	host.start_text_input = h_start_text_input; host.stop_text_input = h_stop_text_input;
 #if defined(__ORBIS__) || defined(PS4)
 	/* /app0 es contenido instalado y no debe usarse para partidas/configuración. */
 	static char ps4_user_data_base[] = "/data/SonicAdvanceTrilogy";
