@@ -130,13 +130,21 @@ int lan_supported(void) {
     return SAT_LAN_NATIVE;
 }
 
+static void reset_sockets(LanSession* s);
+
 static void set_error(LanSession* s, int code) {
     if (!s) return;
+#if SAT_LAN_NATIVE
+    reset_sockets(s);
+#endif
     atomic_store_explicit(&s->error_code, code, memory_order_release);
     store_state(s, LAN_ERROR);
 }
 
 #if SAT_LAN_NATIVE
+# ifndef MSG_NOSIGNAL
+#  define MSG_NOSIGNAL 0
+# endif
 # ifdef _WIN32
 static int socket_failed(LanSocket fd) { return fd == INVALID_SOCKET; }
 static int would_block(void) {
@@ -370,12 +378,15 @@ static int recv_all(LanSocket fd, uint8_t* data, size_t length) {
 static void configure_connected_socket(LanSocket fd) {
     int yes = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*) &yes, sizeof(yes));
+# ifdef SO_NOSIGPIPE
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &yes, sizeof(yes));
+# endif
 # ifdef _WIN32
-    DWORD timeout_ms = 60000;
+    DWORD timeout_ms = 300000;
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, (const char*) &timeout_ms, sizeof(timeout_ms));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, (const char*) &timeout_ms, sizeof(timeout_ms));
 # else
-    struct timeval timeout = {60, 0};
+    struct timeval timeout = {300, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
 # endif
@@ -395,7 +406,11 @@ static void find_local_ipv4(char* out, size_t size) {
     for (struct addrinfo* it = list; it; it = it->ai_next) {
         struct sockaddr_in* addr = (struct sockaddr_in*) it->ai_addr;
         if ((ntohl(addr->sin_addr.s_addr) >> 24) == 127) continue;
+# ifdef _WIN32
+        if (inet_ntop(AF_INET, &addr->sin_addr, out, (DWORD) size)) break;
+# else
         if (inet_ntop(AF_INET, &addr->sin_addr, out, (socklen_t) size)) break;
+# endif
     }
     freeaddrinfo(list);
 }
@@ -489,7 +504,7 @@ static void process_packet(LanSession* s, const uint8_t* p) {
     }
 
     if (!s->is_host && type == LAN_MSG_REJECT) {
-        set_error(s, (int) get_u32(p + 8));
+        set_error(s, (int) get_u32(p + 12));
         return;
     }
     set_error(s, LAN_ERR_PROTOCOL);
@@ -679,16 +694,31 @@ void lan_set_local_input(LanSession* s, uint32_t keys) {
     if (s->mutex_ready) MutexUnlock(&s->input_mutex);
 }
 
-int lan_exchange_input(LanSession* s, uint32_t frame,
-                       uint32_t local_keys, uint32_t* remote_keys) {
+int lan_exchange_input(LanSession* s, uint32_t frame, uint32_t* remote_keys) {
     if (remote_keys) *remote_keys = 0;
     if (!s || lan_state(s) != LAN_CONNECTED) return 0;
 #if SAT_LAN_NATIVE
     uint8_t packet[LAN_PACKET_SIZE], incoming[LAN_PACKET_SIZE];
+    uint32_t local_keys = 0;
+    if (s->mutex_ready) MutexLock(&s->input_mutex);
+    local_keys = s->local_input;
+    if (s->mutex_ready) MutexUnlock(&s->input_mutex);
     make_packet(packet, LAN_MSG_INPUT, frame, local_keys, 0, NULL);
-    if (!send_all(s->socket_fd, packet, sizeof(packet)) ||
-        !recv_all(s->socket_fd, incoming, sizeof(incoming)) ||
-        !packet_valid(incoming) || incoming[5] != LAN_MSG_INPUT ||
+    if (!send_all(s->socket_fd, packet, sizeof(packet))) {
+        set_error(s, LAN_ERR_DISCONNECTED);
+        return 0;
+    }
+    /* A handshake poll may have read the ACCEPT packet and the first input
+     * packet in a single TCP receive. Preserve and consume the buffered frame. */
+    if (s->rx_len >= LAN_PACKET_SIZE) {
+        memcpy(incoming, s->rx, LAN_PACKET_SIZE);
+        memmove(s->rx, s->rx + LAN_PACKET_SIZE, s->rx_len - LAN_PACKET_SIZE);
+        s->rx_len -= LAN_PACKET_SIZE;
+    } else if (!recv_all(s->socket_fd, incoming, sizeof(incoming))) {
+        set_error(s, LAN_ERR_DISCONNECTED);
+        return 0;
+    }
+    if (!packet_valid(incoming) || incoming[5] != LAN_MSG_INPUT ||
         get_u32(incoming + 8) != frame) {
         set_error(s, LAN_ERR_DISCONNECTED);
         return 0;
@@ -696,7 +726,7 @@ int lan_exchange_input(LanSession* s, uint32_t frame,
     if (remote_keys) *remote_keys = get_u32(incoming + 12);
     return 1;
 #else
-    (void) frame; (void) local_keys;
+    (void) frame;
     set_error(s, LAN_ERR_CONNECT);
     return 0;
 #endif
