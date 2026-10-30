@@ -3,6 +3,7 @@
 #include "app.h"
 #include "config.h"
 #include "emu.h"
+#include "lan.h"
 #include "keys.h"
 #include "sys.h"
 #if defined(__EMSCRIPTEN__)
@@ -13,7 +14,7 @@
 #define NUM_GAMES 4
 #define SLOT_COUNT 8
 #define PAUSE_COUNT 8
-#define SET_COUNT 8
+#define SET_COUNT 9
 #define PATH_MAX_APP 600
 #define GBA_FPS 59.7275
 #define TURBO_FRAMES 4
@@ -40,8 +41,12 @@ struct App {
 	/* navegación */
 	State state;
 	int zone, sel, btn;              /* principal: zona 0 tarjetas / 1 botones */
-	int settings_page;               /* 0 ajustes, 1 controles */
+	int settings_page;               /* 0 ajustes, 1 controles, 2 multijugador LAN */
 	int set_sel, controls_from_pause, ctrl_row, ctrl_col;
+	int lan_sel, lan_editing, lan_last_state;
+	char lan_ip[64], lan_password[LAN_PASSWORD_MAX + 1], lan_port_text[8];
+	unsigned lan_game_id; uint64_t lan_rom_signature;
+	LanSession* lan;
 	int capture_kind, capture_act;   /* -1 ninguno, 0 teclado, 1 mando J1, 2 mando J2 */
 	int modal_kind, modal_choice, prompt_game; /* 1 = selector de modo 1J/2J */
 	int pause_sel; float pause_anim[PAUSE_COUNT];
@@ -94,7 +99,7 @@ struct App {
 	
 };
 
-typedef struct { int kind; const char* label; int field; } SettingItem;   /* kind: 0 interruptor, 1 deslizador, 2 ir a, 3 acción, 4 volver */
+typedef struct { int kind; const char* label; int field; } SettingItem;   /* kind: 0 interruptor, 1 deslizador, 2 controles, 3 acción, 4 volver, 5 LAN */
 extern const SettingItem SETTINGS[SET_COUNT];
 extern const char* const PAUSE_LABELS[PAUSE_COUNT];   /* 0 continuar 1 guardar 2 cargar 3 volumen 4 pantalla completa 5 controles 6 reiniciar 7 salir */
 int* cfg_field(Config* c, int field);                 /* 0 pantalla completa, 1 volumen, 2 suavizado, 3 escalado entero, 4 FPS */
@@ -120,6 +125,7 @@ Rect ui_card_rect(const App* a, int i);
 Rect ui_battle_slot_rect(void);
 Rect ui_btn_rect(int j);
 Rect ui_settings_row(int k);
+Rect ui_lan_row_rect(int k);
 Rect ui_ctrl_row_rect(int k);
 Rect ui_ctrl_cell_rect(int k, int col);
 Rect ui_pause_rect(int i);
