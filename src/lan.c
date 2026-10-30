@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <errno.h>
 
 #if !defined(__EMSCRIPTEN__) && !defined(__ORBIS__) && !defined(PS4)
 # define SAT_LAN_NATIVE 1
@@ -408,6 +409,14 @@ static int receive_packets(LanSession* s) {
     return 1;
 }
 
+static int socket_interrupted(void) {
+# ifdef _WIN32
+    return WSAGetLastError() == WSAEINTR;
+# else
+    return errno == EINTR;
+# endif
+}
+
 static int send_all(LanSocket fd, const uint8_t* data, size_t length) {
     size_t done = 0;
     while (done < length) {
@@ -417,7 +426,7 @@ static int send_all(LanSocket fd, const uint8_t* data, size_t length) {
         ssize_t n = send(fd, data + done, length - done, MSG_NOSIGNAL);
 # endif
         if (n > 0) done += (size_t) n;
-        else if (n < 0 && errno == EINTR) continue;
+        else if (n < 0 && socket_interrupted()) continue;
         else return 0;
     }
     return 1;
