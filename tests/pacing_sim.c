@@ -7,7 +7,7 @@
 
 static void write_rom(const char* path);
 static App* app;
-static void key(int k) { AppEvent e = {EV_KEY_DOWN, k, 0}; app_event(app, &e); e.type = EV_KEY_UP; app_event(app, &e); }
+static void key(int k) { AppEvent e = {EV_KEY_DOWN, k, 0, 0, {0}}; app_event(app, &e); e.type = EV_KEY_UP; app_event(app, &e); }
 
 /* modo 0: por reloj, descartando si la cola pasa de 140 ms (primera versión)
  * modo 1: el audio marca el ritmo (versión anterior)
