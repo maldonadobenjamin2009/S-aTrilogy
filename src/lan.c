@@ -75,6 +75,8 @@ struct LanSession {
     LanSocket listener;
     LanSocket socket_fd;
     uint8_t server_nonce[32];
+    uint8_t client_nonce[16];
+    uint8_t session_key[20];
     uint8_t rx[LAN_PACKET_SIZE * 2];
     size_t rx_len;
     uint8_t tx[LAN_PACKET_SIZE];
@@ -289,17 +291,78 @@ static int constant_time_equal(const uint8_t* a, const uint8_t* b, size_t n) {
     return diff == 0;
 }
 
-static void build_auth_proof(LanSession* s, const uint8_t client_nonce[16],
-                             uint8_t proof[20]) {
-    static const uint8_t label[] = "SAT-LAN-ROOM-v1";
+static void derive_room_key(LanSession* s, const uint8_t client_nonce[16], uint8_t key[20]) {
+    static const uint8_t label[] = "SAT-LAN-PBKDF2-v1";
+    uint8_t salt[32 + 16 + sizeof(label) - 1];
+    memcpy(salt, s->server_nonce, 32);
+    memcpy(salt + 32, client_nonce, 16);
+    memcpy(salt + 48, label, sizeof(label) - 1);
+    /* PBKDF2 slows offline guessing of captured challenge responses. */
+    uint8_t block[68], u[20], next[20], t[20];
+    memcpy(block, salt, sizeof(salt));
+    block[sizeof(salt)] = 0; block[sizeof(salt) + 1] = 0;
+    block[sizeof(salt) + 2] = 0; block[sizeof(salt) + 3] = 1;
+    const size_t password_len = strlen(s->password);
+    hmac_sha1(s->password, password_len, block, sizeof(salt) + 4, u);
+    memcpy(t, u, sizeof(t));
+    for (unsigned i = 1; i < 60000; ++i) {
+        hmac_sha1((const char*) u, sizeof(u), u, sizeof(u), next);
+        memcpy(u, next, sizeof(u));
+        for (size_t j = 0; j < sizeof(t); ++j) t[j] ^= u[j];
+    }
+    memcpy(key, t, sizeof(t));
+    memset(salt, 0, sizeof(salt)); memset(block, 0, sizeof(block));
+    memset(u, 0, sizeof(u)); memset(next, 0, sizeof(next)); memset(t, 0, sizeof(t));
+}
+
+static void derive_session_key(LanSession* s, const uint8_t client_nonce[16]) {
+    static const uint8_t label[] = "SAT-LAN-SESSION-v1";
+    uint8_t room_key[20];
     uint8_t message[sizeof(label) - 1 + 32 + 16 + 4 + 8];
     size_t at = 0;
+    derive_room_key(s, client_nonce, room_key);
     memcpy(message + at, label, sizeof(label) - 1); at += sizeof(label) - 1;
     memcpy(message + at, s->server_nonce, 32); at += 32;
     memcpy(message + at, client_nonce, 16); at += 16;
     put_u32(message + at, s->game_id); at += 4;
     put_u64(message + at, s->rom_signature); at += 8;
-    hmac_sha1(s->password, strlen(s->password), message, at, proof);
+    hmac_sha1((const char*) room_key, sizeof(room_key), message, at, s->session_key);
+    memcpy(s->client_nonce, client_nonce, sizeof(s->client_nonce));
+    memset(room_key, 0, sizeof(room_key)); memset(message, 0, sizeof(message));
+}
+
+static void build_auth_proof(LanSession* s, const uint8_t client_nonce[16],
+                             uint8_t proof[20]) {
+    static const uint8_t label[] = "SAT-LAN-ROOM-v1";
+    uint8_t room_key[20];
+    uint8_t message[sizeof(label) - 1 + 32 + 16 + 4 + 8];
+    size_t at = 0;
+    derive_room_key(s, client_nonce, room_key);
+    memcpy(message + at, label, sizeof(label) - 1); at += sizeof(label) - 1;
+    memcpy(message + at, s->server_nonce, 32); at += 32;
+    memcpy(message + at, client_nonce, 16); at += 16;
+    put_u32(message + at, s->game_id); at += 4;
+    put_u64(message + at, s->rom_signature); at += 8;
+    hmac_sha1((const char*) room_key, sizeof(room_key), message, at, proof);
+    memset(room_key, 0, sizeof(room_key)); memset(message, 0, sizeof(message));
+}
+
+static void build_accept_proof(LanSession* s, uint8_t proof[20]) {
+    static const uint8_t message[] = "SAT-LAN-ACCEPT-v1";
+    hmac_sha1((const char*) s->session_key, sizeof(s->session_key), message, sizeof(message) - 1, proof);
+}
+
+static void build_input_proof(LanSession* s, uint32_t frame, uint32_t keys,
+                              unsigned sender_slot, uint8_t proof[20]) {
+    static const uint8_t label[] = "SAT-LAN-INPUT-v1";
+    uint8_t message[sizeof(label) - 1 + 4 + 4 + 1 + 8];
+    size_t at = 0;
+    memcpy(message + at, label, sizeof(label) - 1); at += sizeof(label) - 1;
+    put_u32(message + at, frame); at += 4;
+    put_u32(message + at, keys); at += 4;
+    message[at++] = (uint8_t) sender_slot;
+    put_u64(message + at, s->rom_signature); at += 8;
+    hmac_sha1((const char*) s->session_key, sizeof(s->session_key), message, at, proof);
     memset(message, 0, sizeof(message));
 }
 
@@ -435,7 +498,7 @@ static void reset_sockets(LanSession* s) {
 
 static int setup_password(LanSession* s, const char* password,
                           unsigned game_id, uint64_t rom_signature) {
-    if (!password || strlen(password) < 4 || strlen(password) > LAN_PASSWORD_MAX) return 0;
+    if (!password || strlen(password) < 8 || strlen(password) > LAN_PASSWORD_MAX) return 0;
     snprintf(s->password, sizeof(s->password), "%s", password);
     s->game_id = game_id;
     s->rom_signature = rom_signature;
@@ -465,6 +528,8 @@ static void process_packet(LanSession* s, const uint8_t* p) {
             return;
         }
         memcpy(s->server_nonce, p + 24, sizeof(s->server_nonce));
+        memcpy(s->client_nonce, s->tx, sizeof(s->client_nonce));
+        derive_session_key(s, s->client_nonce);
         uint8_t payload[LAN_PAYLOAD_SIZE] = {0};
         uint8_t proof[20];
         memcpy(payload, s->tx, 16);
@@ -482,12 +547,17 @@ static void process_packet(LanSession* s, const uint8_t* p) {
             s->become_connected = -LAN_ERR_ROM;
             return;
         }
-        build_auth_proof(s, p + 24, expected);
+        memcpy(s->client_nonce, p + 24, sizeof(s->client_nonce));
+        build_auth_proof(s, s->client_nonce, expected);
         if (!constant_time_equal(expected, p + 40, sizeof(expected))) {
             queue_packet(s, LAN_MSG_REJECT, 0, LAN_ERR_PASSWORD, 0, NULL);
             s->become_connected = -LAN_ERR_PASSWORD;
         } else {
-            queue_packet(s, LAN_MSG_ACCEPT, 0, 1, s->rom_signature, NULL);
+            derive_session_key(s, s->client_nonce);
+            uint8_t accept_proof[LAN_PAYLOAD_SIZE] = {0};
+            build_accept_proof(s, accept_proof);
+            queue_packet(s, LAN_MSG_ACCEPT, 0, 1, s->rom_signature, accept_proof);
+            memset(accept_proof, 0, sizeof(accept_proof));
             s->become_connected = 1;
         }
         memset(expected, 0, sizeof(expected));
@@ -495,10 +565,12 @@ static void process_packet(LanSession* s, const uint8_t* p) {
     }
 
     if (!s->is_host && type == LAN_MSG_ACCEPT && lan_state(s) == LAN_HANDSHAKE) {
-        if (signature != s->rom_signature || game != 1) {
-            set_error(s, LAN_ERR_PROTOCOL);
-            return;
-        }
+        uint8_t expected[20];
+        build_accept_proof(s, expected);
+        int valid = signature == s->rom_signature && game == 1 &&
+                    constant_time_equal(expected, p + 24, sizeof(expected));
+        memset(expected, 0, sizeof(expected));
+        if (!valid) { set_error(s, LAN_ERR_PROTOCOL); return; }
         s->player_slot = 1;
         complete_connection(s);
         return;
@@ -544,6 +616,9 @@ void lan_disconnect(LanSession* s) {
     reset_sockets(s);
 #endif
     memset(s->password, 0, sizeof(s->password));
+    memset(s->session_key, 0, sizeof(s->session_key));
+    memset(s->server_nonce, 0, sizeof(s->server_nonce));
+    memset(s->client_nonce, 0, sizeof(s->client_nonce));
     s->local_input = 0;
     atomic_store_explicit(&s->error_code, 0, memory_order_release);
     store_state(s, LAN_IDLE);
@@ -702,12 +777,16 @@ int lan_exchange_input(LanSession* s, uint32_t frame,
     if (!s || lan_state(s) != LAN_CONNECTED) return 0;
 #if SAT_LAN_NATIVE
     uint8_t packet[LAN_PACKET_SIZE], incoming[LAN_PACKET_SIZE];
+    uint8_t payload[LAN_PAYLOAD_SIZE] = {0}, proof[20], expected[20];
     uint32_t local_keys = 0;
     if (s->mutex_ready) MutexLock(&s->input_mutex);
     local_keys = s->local_input;
     if (s->mutex_ready) MutexUnlock(&s->input_mutex);
     if (local_keys_out) *local_keys_out = local_keys;
-    make_packet(packet, LAN_MSG_INPUT, frame, local_keys, 0, NULL);
+    build_input_proof(s, frame, local_keys, s->is_host ? 0u : 1u, proof);
+    memcpy(payload, proof, sizeof(proof));
+    make_packet(packet, LAN_MSG_INPUT, frame, local_keys, s->rom_signature, payload);
+    memset(proof, 0, sizeof(proof));
     if (!send_all(s->socket_fd, packet, sizeof(packet))) {
         set_error(s, LAN_ERR_DISCONNECTED);
         return 0;
@@ -722,12 +801,15 @@ int lan_exchange_input(LanSession* s, uint32_t frame,
         set_error(s, LAN_ERR_DISCONNECTED);
         return 0;
     }
-    if (!packet_valid(incoming) || incoming[5] != LAN_MSG_INPUT ||
-        get_u32(incoming + 8) != frame) {
-        set_error(s, LAN_ERR_DISCONNECTED);
-        return 0;
-    }
-    if (remote_keys) *remote_keys = get_u32(incoming + 12);
+    uint32_t received_frame = get_u32(incoming + 8);
+    uint32_t received_keys = get_u32(incoming + 12);
+    build_input_proof(s, received_frame, received_keys, s->is_host ? 1u : 0u, expected);
+    int valid = packet_valid(incoming) && incoming[5] == LAN_MSG_INPUT &&
+                received_frame == frame && get_u64(incoming + 16) == s->rom_signature &&
+                constant_time_equal(expected, incoming + 24, sizeof(expected));
+    memset(expected, 0, sizeof(expected));
+    if (!valid) { set_error(s, LAN_ERR_PROTOCOL); return 0; }
+    if (remote_keys) *remote_keys = received_keys;
     return 1;
 #else
     (void) frame;
