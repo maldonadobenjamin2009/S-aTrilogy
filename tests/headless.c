@@ -214,6 +214,7 @@ int main(int argc, char** argv) {
 	/* configuración persistida */
 	Config c2; config_defaults(&c2); config_load(&c2, app->cfg_path);
 	CHECK(c2.keys[ACT_A] == 'x' && c2.volume == app->cfg.volume, "config.txt guardado");
+	CHECK(c2.lan_port == LAN_DEFAULT_PORT, "puerto LAN predeterminado persistido");
 
 	/* ---- mando PS4: el clic del panel táctil abre/cierra la pausa */
 	pad(PAD_TOUCHPAD); CHECK(app->state == ST_GAME, "panel táctil reanuda");
