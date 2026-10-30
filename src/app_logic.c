@@ -15,6 +15,8 @@
 #include <math.h>
 #include <string.h>
 
+static uint64_t lan_rom_signature(const char* path);
+
 const GameInfo GAMES[NUM_GAMES] = {
 	{"sa1", "Sonic Advance", "sonicadvance.gba", "sonicadvance", "2001",
 	 "El debut de Sonic en una consola Nintendo", "Dimps / Sonic Team", "Sega / THQ", "Plataformas 2D",
@@ -945,6 +947,11 @@ static int key_action(int k) {
 
 static void on_key_down(App* a, int k, int alt) {
 	set_pad_mode(a, 0);
+	if (a->state == ST_SETTINGS && a->settings_page == 2 && a->lan_editing) {
+		if (k == K_ESCAPE || k == K_RETURN) lan_end_edit(a);
+		else if (k == K_BACKSPACE) lan_text_backspace(a);
+		return;
+	}
 	if (a->capture_kind >= 0) {
 		if (k == K_ESCAPE) a->capture_kind = -1;
 		else if (k == K_DELETE) { assign(a, a->capture_kind, a->capture_act, -1); a->capture_kind = -1; }
@@ -1077,14 +1084,14 @@ static void on_pad_axis(App* a, int axis, int value, int player) {
 static void mouse_move(App* a, int x, int y) {
 	if (a->modal || a->state == ST_GAME) return;
 	if (a->state == ST_SETTINGS) {
-		if (a->settings_page) {
+		if (a->settings_page == 1) {
 			for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) {
 				a->ctrl_row = k;
-				if (k < ACT_COUNT) {
-										for (int col = 0; col < 3; col++)
-						if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
-				}
+				if (k < ACT_COUNT) for (int col = 0; col < 3; col++)
+					if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
 			}
+		} else if (a->settings_page == 2) {
+			for (int k = 0; k < 7; ++k) if (rect_has(ui_lan_row_rect(k), x, y)) a->lan_sel = k;
 		} else for (int k = 0; k < SET_COUNT; k++) if (rect_has(ui_settings_row(k), x, y)) a->set_sel = k;
 	} else if (a->state == ST_PAUSE) {
 		for (int i = 0; i < PAUSE_COUNT; i++) if (rect_has(ui_pause_rect(i), x, y)) a->pause_sel = i;
@@ -1131,7 +1138,8 @@ static void mouse_click(App* a, int x, int y) {
 	int hit = 0;
 	mouse_move(a, x, y);
 	if (a->state == ST_SETTINGS) {
-		if (a->settings_page) { for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) hit = 1; }
+		if (a->settings_page == 1) { for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) hit = 1; }
+		else if (a->settings_page == 2) { for (int k = 0; k < 7; ++k) if (rect_has(ui_lan_row_rect(k), x, y)) hit = 1; }
 		else for (int k = 0; k < SET_COUNT; k++) if (rect_has(ui_settings_row(k), x, y)) hit = 1;
 	} else if (a->state == ST_PAUSE) { for (int i = 0; i < PAUSE_COUNT; i++) if (rect_has(ui_pause_rect(i), x, y)) hit = 1; }
 	else if (a->state == ST_SLOTS) { for (int n = 0; n < SLOT_COUNT; n++) if (rect_has(ui_slot_rect(n), x, y)) hit = 1; }
@@ -1157,6 +1165,9 @@ void app_event(App* a, const AppEvent* ev) {
 	switch (ev->type) {
 	case EV_QUIT: a->quit = 1; break;
 	case EV_KEY_DOWN: on_key_down(a, ev->code, ev->value); break;
+	case EV_TEXT_INPUT:
+		if (a->state == ST_SETTINGS && a->settings_page == 2) lan_text_append(a, ev->text);
+		break;
 	case EV_KEY_UP:
 		set_del(a->keys_down, &a->nkeys, ev->code);
 		if (key_action(ev->code) >= A_UP && key_action(ev->code) <= A_RIGHT) release_dir(a, key_action(ev->code));
@@ -1198,6 +1209,7 @@ void app_event(App* a, const AppEvent* ev) {
 		if (a->pad_count < 2) { a->p2_npad = a->p2_nstick = 0; a->p2_trig[0] = a->p2_trig[1] = 0; }
 		break;
 	case EV_FOCUS_LOST:
+		if (a->lan_editing) lan_end_edit(a);
 		clear_inputs(a);
 		if (a->state == ST_GAME) pause_game(a);
 		break;
@@ -1211,6 +1223,24 @@ void app_event(App* a, const AppEvent* ev) {
 int app_update(App* a, double dt) {
 	a->now += dt;
 	if (a->quit) return 0;
+	if (a->lan) {
+		int net_state = lan_state(a->lan);
+		if (net_state == LAN_WAITING || net_state == LAN_CONNECTING || net_state == LAN_HANDSHAKE) lan_poll(a->lan);
+		net_state = lan_state(a->lan);
+		if (net_state == LAN_CONNECTED && a->lan_last_state != LAN_CONNECTED) {
+			memset(a->lan_password, 0, sizeof(a->lan_password));
+			app_toast(a, "Conexión LAN lista. Ambos pueden iniciar el juego seleccionado");
+		}
+		if (net_state == LAN_ERROR && a->lan_last_state != LAN_ERROR) {
+			char reason[220];
+			snprintf(reason, sizeof(reason), "LAN: %s", lan_status(a->lan));
+			if (a->state == ST_GAME && a->emu) {
+				exit_game(a);
+				app_modal(a, "Conexión LAN perdida", reason);
+			} else app_toast(a, "%s", reason);
+		}
+		a->lan_last_state = lan_state(a->lan);
+	}
 #if defined(__EMSCRIPTEN__)
 	poll_web_link_launch(a);
 #endif
@@ -1236,9 +1266,13 @@ int app_update(App* a, double dt) {
 	if (a->state != ST_GAME && !a->emu && a->now - a->last_scan > 1.0) app_scan_roms(a);
 
 	if (a->state == ST_GAME && a->emu) {
-		emu_set_keys(a->emu, keymask(a));
-		if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
-		if (a->emu3) emu_set_keys(a->emu3, keymask3(a));
+		if (a->lan && lan_state(a->lan) == LAN_CONNECTED) {
+			lan_set_local_input(a->lan, keymask(a));
+		} else {
+			emu_set_keys(a->emu, keymask(a));
+			if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
+			if (a->emu3) emu_set_keys(a->emu3, keymask3(a));
+		}
 		/* El turbo por frame solo es válido con un núcleo aislado. */
 		a->turbo = !a->emu2 && turbo_active(a);
 		for (int k = 0; k < (a->turbo ? TURBO_FRAMES : 1); k++) {
@@ -1325,6 +1359,9 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	a->web_launch_game = -1;
 #endif
 	if (host) a->host = *host;
+	a->lan = lan_create();
+	if (!a->lan) debug_log_warn("No se pudo reservar el estado de multijugador LAN");
+	a->lan_last_state = LAN_IDLE;
 	snprintf(a->base, sizeof(a->base), "%s", base_dir);
 	/* Los recursos instalados (ROMs/assets) pueden estar en una carpeta de solo lectura.
 	 * Las partidas y ajustes usan user_data_dir cuando la plataforma lo proporciona. */
@@ -1367,6 +1404,7 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	a->ui = cv_new(UI_W, UI_H);
 	if (!a->ui) {
 		debug_log_error("app_create: no hay memoria para el lienzo de UI (%dx%d)", UI_W, UI_H);
+		lan_destroy(a->lan);
 		free(a);
 		return NULL;
 	}
@@ -1393,6 +1431,8 @@ void app_destroy(App* a) {
 #endif
 	if (a->emu) emu_close(a->emu);
 	a->emu = a->emu2 = a->emu3 = NULL;
+	lan_destroy(a->lan);
+	a->lan = NULL;
 	for (int n = 1; n <= SLOT_COUNT; n++) cv_free(a->slot_thumbs[n]);
 	ui_free_assets(a);
 	cv_free(a->ui);
