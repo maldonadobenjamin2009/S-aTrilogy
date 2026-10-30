@@ -373,7 +373,7 @@ static void poll_web_link_launch(App* a) {
 
 static void start_game_now(App* a, int i, int players) {
 	int lan_mode = a->lan && lan_state(a->lan) == LAN_CONNECTED;
-	if (lan_mode && (players != 2 || a->lan_game_id != (unsigned) i || lan_game_signature(a, i) != a->lan_rom_signature)) {
+	if (lan_mode && (players != 2 || a->lan_game_id != (unsigned) i || lan_game_signature(a, i) != a->lan_session_signature)) {
 		app_toast(a, "La sala LAN requiere el mismo juego, ROM, BIOS y guardados");
 		return;
 	}
