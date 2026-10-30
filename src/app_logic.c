@@ -675,7 +675,9 @@ static int lan_hash_file(uint64_t* hash, const char* path, int required) {
 		for (size_t i = 0; i < n; ++i) lan_hash_byte(hash, buffer[i]);
 	int failed = ferror(f);
 	fclose(f);
-	return !failed;
+	if (failed) return 0;
+	lan_hash_byte(hash, 0xFF); /* separator between ROM, saves and BIOS */
+	return 1;
 }
 
 static uint64_t lan_game_signature(const App* a, int game_index) {
