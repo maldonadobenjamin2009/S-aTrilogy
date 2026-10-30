@@ -439,7 +439,7 @@ static void start_game(App* a, int i) {
 			return;
 		}
 		if (net_state == LAN_CONNECTED) {
-			if (a->lan_game_id != (unsigned) i || lan_rom_signature(a->rom_path[i]) != a->lan_rom_signature) {
+			if (a->lan_game_id != (unsigned) i || lan_game_signature(a, i) != a->lan_session_signature) {
 				app_toast(a, "Seleccioná el mismo juego, ROM, BIOS y guardados de la sala");
 				return;
 			}
@@ -767,7 +767,7 @@ static void lan_room_start(App* a, int host) {
 		: lan_join_start(a->lan, a->lan_ip, port, a->lan_password, (unsigned) a->sel, signature);
 	if (ok) {
 		a->lan_game_id = (unsigned) a->sel;
-		a->lan_rom_signature = signature;
+		a->lan_session_signature = signature;
 		a->lan_last_state = lan_state(a->lan);
 		if (host) app_toast(a, "Sala abierta · IP %s · puerto %u", lan_local_ipv4(a->lan), (unsigned) port);
 		else app_toast(a, "Conectando a %s:%u…", a->lan_ip, (unsigned) port);
