@@ -464,6 +464,7 @@ static void process_packet(LanSession* s, const uint8_t* p) {
             set_error(s, LAN_ERR_NO_RANDOM);
             return;
         }
+        memcpy(s->server_nonce, p + 24, sizeof(s->server_nonce));
         uint8_t payload[LAN_PAYLOAD_SIZE] = {0};
         uint8_t proof[20];
         memcpy(payload, s->tx, 16);
@@ -694,7 +695,9 @@ void lan_set_local_input(LanSession* s, uint32_t keys) {
     if (s->mutex_ready) MutexUnlock(&s->input_mutex);
 }
 
-int lan_exchange_input(LanSession* s, uint32_t frame, uint32_t* remote_keys) {
+int lan_exchange_input(LanSession* s, uint32_t frame,
+                       uint32_t* local_keys_out, uint32_t* remote_keys) {
+    if (local_keys_out) *local_keys_out = 0;
     if (remote_keys) *remote_keys = 0;
     if (!s || lan_state(s) != LAN_CONNECTED) return 0;
 #if SAT_LAN_NATIVE
@@ -703,6 +706,7 @@ int lan_exchange_input(LanSession* s, uint32_t frame, uint32_t* remote_keys) {
     if (s->mutex_ready) MutexLock(&s->input_mutex);
     local_keys = s->local_input;
     if (s->mutex_ready) MutexUnlock(&s->input_mutex);
+    if (local_keys_out) *local_keys_out = local_keys;
     make_packet(packet, LAN_MSG_INPUT, frame, local_keys, 0, NULL);
     if (!send_all(s->socket_fd, packet, sizeof(packet))) {
         set_error(s, LAN_ERR_DISCONNECTED);
