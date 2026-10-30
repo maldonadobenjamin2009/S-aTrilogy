@@ -41,7 +41,7 @@ void lan_set_local_input(LanSession* session, uint32_t keys);
 /* Bloquea hasta intercambiar el estado de entrada del fotograma indicado.
  * Debe llamarse desde un único hilo por sesión y en ambos extremos. */
 int lan_exchange_input(LanSession* session, uint32_t frame,
-                       uint32_t local_keys, uint32_t* remote_keys);
+                       uint32_t* remote_keys);
 
 #ifdef __cplusplus
 }
