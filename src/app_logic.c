@@ -1091,7 +1091,8 @@ static void mouse_move(App* a, int x, int y) {
 					if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
 			}
 		} else if (a->settings_page == 2) {
-			for (int k = 0; k < 7; ++k) if (rect_has(ui_lan_row_rect(k), x, y)) a->lan_sel = k;
+			if (!a->lan_editing)
+				for (int k = 0; k < 7; ++k) if (rect_has(ui_lan_row_rect(k), x, y)) a->lan_sel = k;
 		} else for (int k = 0; k < SET_COUNT; k++) if (rect_has(ui_settings_row(k), x, y)) a->set_sel = k;
 	} else if (a->state == ST_PAUSE) {
 		for (int i = 0; i < PAUSE_COUNT; i++) if (rect_has(ui_pause_rect(i), x, y)) a->pause_sel = i;
