@@ -19,7 +19,7 @@ static void run(const char* name, const Scn* s, int preroll_ms) {
 	double t = 0, next_sched = 0, next_exec = 0, next_pull = s->chunk / dev_rate;
 	long underruns = 0, pulls = 0, frames = 0, late = 0;
 	double qmin = 1e9, qmax = 0, qsum = 0, rmin = 9, rmax = 0; long qn = 0;
-	AppEvent e = {EV_KEY_DOWN, K_RETURN, 0};
+	AppEvent e = {EV_KEY_DOWN, K_RETURN, 0, 0, {0}};
 	app_event(app, &e);
 	for (int i = 0; i < 4 && app_debug_state(app) != ST_GAME; i++) app_update(app, 0.016);
 	app_audio_reset_requested(app);
