@@ -299,7 +299,7 @@ static void derive_room_key(LanSession* s, const uint8_t client_nonce[16], uint8
     memcpy(salt + 32, client_nonce, 16);
     memcpy(salt + 48, label, sizeof(label) - 1);
     /* PBKDF2 slows offline guessing of captured challenge responses. */
-    uint8_t block[68], u[20], next[20], t[20];
+    uint8_t block[sizeof(salt) + 4], u[20], next[20], t[20];
     memcpy(block, salt, sizeof(salt));
     block[sizeof(salt)] = 0; block[sizeof(salt) + 1] = 0;
     block[sizeof(salt) + 2] = 0; block[sizeof(salt) + 3] = 1;
@@ -441,7 +441,7 @@ static int recv_all(LanSocket fd, uint8_t* data, size_t length) {
         ssize_t n = recv(fd, data + done, length - done, 0);
 # endif
         if (n > 0) done += (size_t) n;
-        else if (n < 0 && errno == EINTR) continue;
+        else if (n < 0 && socket_interrupted()) continue;
         else return 0;
     }
     return 1;
@@ -631,6 +631,21 @@ void lan_disconnect(LanSession* s) {
     s->local_input = 0;
     atomic_store_explicit(&s->error_code, 0, memory_order_release);
     store_state(s, LAN_IDLE);
+}
+
+void lan_abort(LanSession* s) {
+    if (!s) return;
+    atomic_store_explicit(&s->error_code, LAN_ERR_DISCONNECTED, memory_order_release);
+    store_state(s, LAN_ERROR);
+#if SAT_LAN_NATIVE
+# ifdef _WIN32
+    if (s->socket_fd != LAN_INVALID_SOCKET) shutdown(s->socket_fd, SD_BOTH);
+    if (s->listener != LAN_INVALID_SOCKET) shutdown(s->listener, SD_BOTH);
+# else
+    if (s->socket_fd >= 0) shutdown(s->socket_fd, SHUT_RDWR);
+    if (s->listener >= 0) shutdown(s->listener, SHUT_RDWR);
+# endif
+#endif
 }
 
 void lan_destroy(LanSession* s) {
