@@ -15,7 +15,7 @@
 #include <math.h>
 #include <string.h>
 
-static uint64_t lan_rom_signature(const char* path);
+static uint64_t lan_game_signature(const App* a, int game_index);
 
 const GameInfo GAMES[NUM_GAMES] = {
 	{"sa1", "Sonic Advance", "sonicadvance.gba", "sonicadvance", "2001",
@@ -373,8 +373,8 @@ static void poll_web_link_launch(App* a) {
 
 static void start_game_now(App* a, int i, int players) {
 	int lan_mode = a->lan && lan_state(a->lan) == LAN_CONNECTED;
-	if (lan_mode && (players != 2 || a->lan_game_id != (unsigned) i || lan_rom_signature(a->rom_path[i]) != a->lan_rom_signature)) {
-		app_toast(a, "La sala LAN requiere el mismo juego y la misma ROM");
+	if (lan_mode && (players != 2 || a->lan_game_id != (unsigned) i || lan_game_signature(a, i) != a->lan_rom_signature)) {
+		app_toast(a, "La sala LAN requiere el mismo juego, ROM, BIOS y guardados");
 		return;
 	}
 	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24], save3[PATH_MAX_APP + 24];
@@ -440,7 +440,7 @@ static void start_game(App* a, int i) {
 		}
 		if (net_state == LAN_CONNECTED) {
 			if (a->lan_game_id != (unsigned) i || lan_rom_signature(a->rom_path[i]) != a->lan_rom_signature) {
-				app_toast(a, "Seleccioná el mismo juego y ROM configurados en la sala");
+				app_toast(a, "Seleccioná el mismo juego, ROM, BIOS y guardados de la sala");
 				return;
 			}
 			a->prompt_game = i;
@@ -654,21 +654,42 @@ static void settings_action(App* a, int act) {
 	}
 }
 
-static uint64_t lan_rom_signature(const char* path) {
+static void lan_hash_byte(uint64_t* hash, uint8_t byte) {
+	*hash ^= byte;
+	*hash *= UINT64_C(1099511628211);
+}
+
+/* Optional files are part of the deterministic starting state: a missing save
+ * is different from an existing (even empty) save. Required ROM failures abort. */
+static int lan_hash_file(uint64_t* hash, const char* path, int required) {
 	FILE* f = fopen(path, "rb");
-	if (!f) return 0;
-	uint64_t hash = UINT64_C(14695981039346656037);
+	if (!f) {
+		if (required || sys_file_exists(path)) return 0;
+		lan_hash_byte(hash, 0);
+		return 1;
+	}
+	lan_hash_byte(hash, 1);
 	unsigned char buffer[4096];
 	size_t n;
-	while ((n = fread(buffer, 1, sizeof(buffer), f)) > 0) {
-		for (size_t i = 0; i < n; ++i) {
-			hash ^= buffer[i];
-			hash *= UINT64_C(1099511628211);
-		}
-	}
+	while ((n = fread(buffer, 1, sizeof(buffer), f)) > 0)
+		for (size_t i = 0; i < n; ++i) lan_hash_byte(hash, buffer[i]);
 	int failed = ferror(f);
 	fclose(f);
-	return failed ? 0 : hash;
+	return !failed;
+}
+
+static uint64_t lan_game_signature(const App* a, int game_index) {
+	if (!a || game_index < 0 || game_index >= NUM_GAMES) return 0;
+	uint64_t hash = UINT64_C(14695981039346656037);
+	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
+	if (!lan_hash_file(&hash, a->rom_path[game_index], 1)) return 0;
+	sys_stem(a->rom_path[game_index], stem, sizeof(stem));
+	snprintf(save, sizeof(save), "%s/%s.sav", a->saves_dir, stem);
+	snprintf(save2, sizeof(save2), "%s/%s.p2.sav", a->saves_dir, stem);
+	if (!lan_hash_file(&hash, save, 0) ||
+	    !lan_hash_file(&hash, save2, 0) ||
+	    !lan_hash_file(&hash, a->bios_file, 0)) return 0;
+	return hash ? hash : UINT64_C(1);
 }
 
 static void lan_begin_edit(App* a) {
@@ -735,7 +756,7 @@ static void lan_room_start(App* a, int host) {
 		app_toast(a, "La contraseña debe tener al menos 8 caracteres");
 		return;
 	}
-	uint64_t signature = lan_rom_signature(a->rom_path[a->sel]);
+	uint64_t signature = lan_game_signature(a, a->sel);
 	if (!signature) {
 		app_toast(a, "No se pudo comprobar la ROM seleccionada");
 		return;
