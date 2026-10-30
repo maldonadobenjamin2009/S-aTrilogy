@@ -27,8 +27,10 @@
 #  include <netdb.h>
 #  include <netinet/in.h>
 #  include <netinet/tcp.h>
-#  include <ifaddrs.h>
-#  include <net/if.h>
+#  if !defined(__ANDROID__)
+#   include <ifaddrs.h>
+#   include <net/if.h>
+#  endif
 #  include <sys/types.h>
 #  include <sys/socket.h>
 #  include <sys/time.h>
@@ -492,7 +494,7 @@ static void find_local_ipv4(char* out, size_t size) {
     if (!out || size == 0) return;
     snprintf(out, size, "No disponible");
     char fallback[48] = {0};
-# ifdef _WIN32
+# if defined(_WIN32) || defined(__ANDROID__)
     char hostname[128];
     if (gethostname(hostname, sizeof(hostname) - 1) != 0) return;
     hostname[sizeof(hostname) - 1] = 0;
@@ -506,7 +508,11 @@ static void find_local_ipv4(char* out, size_t size) {
         uint32_t ip = ntohl(addr->sin_addr.s_addr);
         if ((ip >> 24) == 127) continue;
         char candidate[48];
+# ifdef _WIN32
         if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (DWORD) sizeof(candidate))) continue;
+# else
+        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (socklen_t) sizeof(candidate))) continue;
+# endif
         if (!fallback[0]) snprintf(fallback, sizeof(fallback), "%s", candidate);
         if (is_private_ipv4(ip)) {
             snprintf(out, size, "%s", candidate);
