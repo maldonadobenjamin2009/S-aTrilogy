@@ -10,6 +10,7 @@ typedef struct {
 	int smooth;          /* suavizado de imagen en el juego */
 	int integer_scale;
 	int show_fps;
+	int lan_port;       /* TCP port shared by all peers; 1024..65535 */
 	int keys[ACT_COUNT]; /* código de tecla o -1 */
 	int pad[2][ACT_COUNT]; /* asignaciones independientes de mando para J1 y J2 */
 } Config;
