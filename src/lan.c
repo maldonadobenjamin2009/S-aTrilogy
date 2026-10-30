@@ -66,6 +66,7 @@ struct LanSession {
     int player_slot;
     int wsa_started;
     int mutex_ready;
+    int socket_runtime_ready;
     Mutex input_mutex;
     uint32_t local_input;
     unsigned game_id;
@@ -477,7 +478,7 @@ static void configure_connected_socket(LanSocket fd) {
 static void find_local_ipv4(char* out, size_t size) {
     if (!out || size == 0) return;
     snprintf(out, size, "No disponible");
-    char hostname[128];
+    char hostname[128], fallback[48] = {0};
     if (gethostname(hostname, sizeof(hostname) - 1) != 0) return;
     hostname[sizeof(hostname) - 1] = 0;
     struct addrinfo hints, *list = NULL;
@@ -487,13 +488,24 @@ static void find_local_ipv4(char* out, size_t size) {
     if (getaddrinfo(hostname, NULL, &hints, &list) != 0) return;
     for (struct addrinfo* it = list; it; it = it->ai_next) {
         struct sockaddr_in* addr = (struct sockaddr_in*) it->ai_addr;
-        if ((ntohl(addr->sin_addr.s_addr) >> 24) == 127) continue;
+        uint32_t ip = ntohl(addr->sin_addr.s_addr);
+        if ((ip >> 24) == 127) continue;
+        char candidate[48];
 # ifdef _WIN32
-        if (inet_ntop(AF_INET, &addr->sin_addr, out, (DWORD) size)) break;
+        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (DWORD) sizeof(candidate))) continue;
 # else
-        if (inet_ntop(AF_INET, &addr->sin_addr, out, (socklen_t) size)) break;
+        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (socklen_t) sizeof(candidate))) continue;
 # endif
+        if (!fallback[0]) snprintf(fallback, sizeof(fallback), "%s", candidate);
+        /* Prefer a private intranet IPv4 over VPN, virtual or public interfaces. */
+        if ((ip >> 24) == 10 || (ip >> 16) == 0xC0A8 ||
+            (ip & 0xFFF00000u) == 0xAC100000u) {
+            snprintf(out, size, "%s", candidate);
+            break;
+        }
     }
+    if (strcmp(out, "No disponible") == 0 && fallback[0])
+        snprintf(out, size, "%s", fallback);
     freeaddrinfo(list);
 }
 
@@ -620,11 +632,16 @@ LanSession* lan_create(void) {
     if (!s) return NULL;
     atomic_init(&s->state, LAN_IDLE);
     atomic_init(&s->error_code, 0);
-    if (MutexInit(&s->input_mutex) == 0) s->mutex_ready = 1;
+    if (MutexInit(&s->input_mutex) != 0) {
+        free(s);
+        return NULL;
+    }
+    s->mutex_ready = 1;
 #if SAT_LAN_NATIVE
     s->listener = LAN_INVALID_SOCKET;
     s->socket_fd = LAN_INVALID_SOCKET;
-    if (!begin_winsock(s)) set_error(s, LAN_ERR_CONNECT);
+    s->socket_runtime_ready = begin_winsock(s);
+    if (!s->socket_runtime_ready) set_error(s, LAN_ERR_CONNECT);
 #endif
     return s;
 }
@@ -674,6 +691,7 @@ int lan_host_start(LanSession* s, unsigned short port, const char* password,
     if (!s || !lan_supported() || !port) return 0;
 #if SAT_LAN_NATIVE
     lan_disconnect(s);
+    if (!s->socket_runtime_ready) { set_error(s, LAN_ERR_CONNECT); return 0; }
     if (!setup_password(s, password, game_id, rom_signature)) {
         set_error(s, LAN_ERR_CONFIG); return 0;
     }
@@ -706,6 +724,7 @@ int lan_join_start(LanSession* s, const char* host_ipv4, unsigned short port,
     if (!s || !lan_supported() || !host_ipv4 || !port) return 0;
 #if SAT_LAN_NATIVE
     lan_disconnect(s);
+    if (!s->socket_runtime_ready) { set_error(s, LAN_ERR_CONNECT); return 0; }
     if (!setup_password(s, password, game_id, rom_signature)) {
         set_error(s, LAN_ERR_CONFIG); return 0;
     }
