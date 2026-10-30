@@ -46,7 +46,8 @@ const GameInfo GAMES[NUM_GAMES] = {
 const SettingItem SETTINGS[SET_COUNT] = {
 	{0, "Pantalla completa", 0}, {1, "Volumen", 1}, {0, "Suavizado de imagen", 2},
 	{0, "Escalado entero (píxeles nítidos)", 3}, {0, "Mostrar FPS durante el juego", 4},
-	{2, "Controles…", 0}, {3, "Abrir carpeta de ROMs", 0}, {4, "Volver", 0},
+	{2, "Controles…", 0}, {5, "Multijugador LAN…", 0}, {3, "Abrir carpeta de ROMs", 0},
+	{4, "Volver", 0},
 };
 const char* const PAUSE_LABELS[PAUSE_COUNT] = {
 	"CONTINUAR", "GUARDAR PARTIDA", "CARGAR PARTIDA", "VOLUMEN", "PANTALLA COMPLETA", "CONTROLES", "REINICIAR", "SALIR",
@@ -616,6 +617,135 @@ static void settings_action(App* a, int act) {
 			if (it->kind == 2) open_controls(a, 0);
 			else if (it->kind == 3) open_folder_roms(a);
 			else if (it->kind == 4) a->state = ST_MAIN;
+			else if (it->kind == 5) {
+				a->settings_page = 2;
+				a->lan_sel = 0;
+				a->lan_editing = 0;
+				snprintf(a->lan_port_text, sizeof(a->lan_port_text), "%d", a->cfg.lan_port);
+			}
+		}
+	}
+}
+
+static uint64_t lan_rom_signature(const char* path) {
+	FILE* f = fopen(path, "rb");
+	if (!f) return 0;
+	uint64_t hash = UINT64_C(14695981039346656037);
+	unsigned char buffer[4096];
+	size_t n;
+	while ((n = fread(buffer, 1, sizeof(buffer), f)) > 0) {
+		for (size_t i = 0; i < n; ++i) {
+			hash ^= buffer[i];
+			hash *= UINT64_C(1099511628211);
+		}
+	}
+	int failed = ferror(f);
+	fclose(f);
+	return failed ? 0 : hash;
+}
+
+static void lan_begin_edit(App* a) {
+	if (a->lan_sel > 2 || !a->host.start_text_input) {
+		if (!a->host.start_text_input) app_toast(a, "Este dispositivo no admite entrada de texto");
+		return;
+	}
+	a->lan_editing = 1;
+	a->host.start_text_input(a->host.user);
+}
+
+static void lan_end_edit(App* a) {
+	if (!a->lan_editing) return;
+	a->lan_editing = 0;
+	if (a->host.stop_text_input) a->host.stop_text_input(a->host.user);
+	if (a->lan_sel == 1) {
+		char* end = NULL;
+		long port = strtol(a->lan_port_text, &end, 10);
+		if (!end || *end || port < 1024 || port > 65535) {
+			snprintf(a->lan_port_text, sizeof(a->lan_port_text), "%d", a->cfg.lan_port);
+			app_toast(a, "El puerto debe estar entre 1024 y 65535");
+		} else {
+			a->cfg.lan_port = (int) port;
+			app_save_config(a);
+		}
+	}
+}
+
+static void lan_text_append(App* a, const char* text) {
+	if (!a->lan_editing || !text) return;
+	char* dst = a->lan_sel == 0 ? a->lan_ip :
+	            (a->lan_sel == 1 ? a->lan_port_text : a->lan_password);
+	size_t max = a->lan_sel == 0 ? sizeof(a->lan_ip) - 1 :
+	             (a->lan_sel == 1 ? sizeof(a->lan_port_text) - 1 : sizeof(a->lan_password) - 1);
+	size_t used = strlen(dst);
+	for (const unsigned char* p = (const unsigned char*) text; *p && used < max; ++p) {
+		unsigned char ch = *p;
+		int allowed = a->lan_sel == 0 ? ((ch >= '0' && ch <= '9') || ch == '.') :
+		              (a->lan_sel == 1 ? (ch >= '0' && ch <= '9') :
+		               (ch >= 32 && ch <= 126));
+		if (allowed) dst[used++] = (char) ch;
+	}
+	dst[used] = 0;
+}
+
+static void lan_text_backspace(App* a) {
+	if (!a->lan_editing) return;
+	char* dst = a->lan_sel == 0 ? a->lan_ip :
+	            (a->lan_sel == 1 ? a->lan_port_text : a->lan_password);
+	size_t n = strlen(dst);
+	if (n) dst[n - 1] = 0;
+}
+
+static void lan_room_start(App* a, int host) {
+	if (!lan_supported()) {
+		app_toast(a, "Multijugador LAN no disponible en esta plataforma");
+		return;
+	}
+	if (!a->rom_found[a->sel]) {
+		app_toast(a, "Falta la ROM: %s", GAMES[a->sel].rom);
+		return;
+	}
+	if (strlen(a->lan_password) < 4) {
+		app_toast(a, "La contraseña debe tener al menos 4 caracteres");
+		return;
+	}
+	uint64_t signature = lan_rom_signature(a->rom_path[a->sel]);
+	if (!signature) {
+		app_toast(a, "No se pudo comprobar la ROM seleccionada");
+		return;
+	}
+	unsigned short port = (unsigned short) a->cfg.lan_port;
+	int ok = host
+		? lan_host_start(a->lan, port, a->lan_password, (unsigned) a->sel, signature)
+		: lan_join_start(a->lan, a->lan_ip, port, a->lan_password, (unsigned) a->sel, signature);
+	if (ok) {
+		a->lan_game_id = (unsigned) a->sel;
+		a->lan_rom_signature = signature;
+		a->lan_last_state = lan_state(a->lan);
+		if (host) app_toast(a, "Sala abierta · IP %s · puerto %u", lan_local_ipv4(a->lan), (unsigned) port);
+		else app_toast(a, "Conectando a %s:%u…", a->lan_ip, (unsigned) port);
+	} else app_toast(a, "LAN: %s", lan_status(a->lan));
+}
+
+static void lan_menu_action(App* a, int act) {
+	if (a->lan_editing) {
+		if (act == A_ACCEPT || act == A_BACK || act == A_MENU) lan_end_edit(a);
+		return;
+	}
+	if (act == A_UP) a->lan_sel = (a->lan_sel + 6) % 7;
+	else if (act == A_DOWN) a->lan_sel = (a->lan_sel + 1) % 7;
+	else if (act == A_BACK || act == A_MENU) a->settings_page = 0;
+	else if (act == A_ACCEPT) {
+		switch (a->lan_sel) {
+		case 0: case 1: case 2: lan_begin_edit(a); break;
+		case 3: lan_room_start(a, 1); break;
+		case 4: lan_room_start(a, 0); break;
+		case 5:
+			lan_disconnect(a->lan);
+			memset(a->lan_password, 0, sizeof(a->lan_password));
+			a->lan_last_state = LAN_IDLE;
+			app_toast(a, "Desconectado de la sala LAN");
+			break;
+		case 6: a->settings_page = 0; break;
 		}
 	}
 }
