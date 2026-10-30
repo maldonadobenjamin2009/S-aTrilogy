@@ -457,7 +457,7 @@ static void draw_lan_settings(App* a, Canvas* c) {
 		snprintf(status, sizeof(status), "Juego seleccionado: %s  ·  Puerto configurado: %d", GAMES[a->sel].title, a->cfg.lan_port);
 		T(c, status, p.x + 50, p.y + p.h - 112, 19, C_MUTED, TX_VMID);
 	}
-	T(c, "Ambos equipos deben usar el mismo juego, ROM y puerto.", p.x + 50, p.y + p.h - 78, 18, C_MUTED, TX_VMID);
+	T(c, "Ambos equipos deben tener la misma ROM, BIOS, guardados y puerto.", p.x + 50, p.y + p.h - 78, 18, C_MUTED, TX_VMID);
 	Hint h[3] = {{GL_DPAD, "↑ ↓", "Mover"}, {GL_CROSS, "Enter", a->lan_editing ? "Terminar" : "Editar"}, {GL_CIRCLE, "Esc", "Volver"}};
 	draw_hints(a, c, h, 3, p.x + p.w - 30, p.y + p.h - 36);
 }
