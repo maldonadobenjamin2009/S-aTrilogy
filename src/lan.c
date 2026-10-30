@@ -119,7 +119,7 @@ const char* lan_status(const LanSession* s) {
         case LAN_ERR_CONNECT: return "No se pudo conectar. Comprobá IP, puerto y aislamiento Wi-Fi";
         case LAN_ERR_NO_RANDOM: return "No se pudo generar el desafío seguro de la sala";
         case LAN_ERR_PASSWORD: return "Contraseña incorrecta";
-        case LAN_ERR_ROM: return "El otro jugador usa un juego o una ROM diferente";
+        case LAN_ERR_ROM: return "El otro jugador usa una ROM, BIOS o guardados diferentes";
         case LAN_ERR_TIMEOUT: return "Se agotó el tiempo de espera de la conexión";
         case LAN_ERR_PROTOCOL: return "La versión del protocolo LAN no coincide";
         default: return "Se interrumpió la conexión LAN";
