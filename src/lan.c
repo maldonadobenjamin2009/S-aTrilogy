@@ -447,6 +447,16 @@ static int recv_all(LanSocket fd, uint8_t* data, size_t length) {
     return 1;
 }
 
+static int recv_packet_buffered(LanSession* s, uint8_t* data, size_t length) {
+    size_t copied = s->rx_len < length ? s->rx_len : length;
+    if (copied) {
+        memcpy(data, s->rx, copied);
+        memmove(s->rx, s->rx + copied, s->rx_len - copied);
+        s->rx_len -= copied;
+    }
+    return copied == length || recv_all(s->socket_fd, data + copied, length - copied);
+}
+
 static void configure_connected_socket(LanSocket fd) {
     int yes = 1;
     setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, (const char*) &yes, sizeof(yes));
@@ -817,11 +827,7 @@ int lan_exchange_input(LanSession* s, uint32_t frame,
     }
     /* A handshake poll may have read the ACCEPT packet and the first input
      * packet in a single TCP receive. Preserve and consume the buffered frame. */
-    if (s->rx_len >= LAN_PACKET_SIZE) {
-        memcpy(incoming, s->rx, LAN_PACKET_SIZE);
-        memmove(s->rx, s->rx + LAN_PACKET_SIZE, s->rx_len - LAN_PACKET_SIZE);
-        s->rx_len -= LAN_PACKET_SIZE;
-    } else if (!recv_all(s->socket_fd, incoming, sizeof(incoming))) {
+    if (!recv_packet_buffered(s, incoming, sizeof(incoming))) {
         set_error(s, LAN_ERR_DISCONNECTED);
         return 0;
     }
