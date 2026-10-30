@@ -27,6 +27,8 @@
 #  include <netdb.h>
 #  include <netinet/in.h>
 #  include <netinet/tcp.h>
+#  include <ifaddrs.h>
+#  include <net/if.h>
 #  include <sys/types.h>
 #  include <sys/socket.h>
 #  include <sys/time.h>
@@ -140,6 +142,12 @@ static void set_error(LanSession* s, int code) {
     if (!s) return;
 #if SAT_LAN_NATIVE
     reset_sockets(s);
+#endif
+    memset(s->password, 0, sizeof(s->password));
+#if SAT_LAN_NATIVE
+    memset(s->session_key, 0, sizeof(s->session_key));
+    memset(s->server_nonce, 0, sizeof(s->server_nonce));
+    memset(s->client_nonce, 0, sizeof(s->client_nonce));
 #endif
     atomic_store_explicit(&s->error_code, code, memory_order_release);
     store_state(s, LAN_ERROR);
@@ -475,10 +483,17 @@ static void configure_connected_socket(LanSocket fd) {
 # endif
 }
 
+static int is_private_ipv4(uint32_t ip) {
+    return (ip >> 24) == 10 || (ip >> 16) == 0xC0A8 ||
+           (ip & 0xFFF00000u) == 0xAC100000u;
+}
+
 static void find_local_ipv4(char* out, size_t size) {
     if (!out || size == 0) return;
     snprintf(out, size, "No disponible");
-    char hostname[128], fallback[48] = {0};
+    char fallback[48] = {0};
+# ifdef _WIN32
+    char hostname[128];
     if (gethostname(hostname, sizeof(hostname) - 1) != 0) return;
     hostname[sizeof(hostname) - 1] = 0;
     struct addrinfo hints, *list = NULL;
@@ -491,22 +506,34 @@ static void find_local_ipv4(char* out, size_t size) {
         uint32_t ip = ntohl(addr->sin_addr.s_addr);
         if ((ip >> 24) == 127) continue;
         char candidate[48];
-# ifdef _WIN32
         if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (DWORD) sizeof(candidate))) continue;
-# else
-        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (socklen_t) sizeof(candidate))) continue;
-# endif
         if (!fallback[0]) snprintf(fallback, sizeof(fallback), "%s", candidate);
-        /* Prefer a private intranet IPv4 over VPN, virtual or public interfaces. */
-        if ((ip >> 24) == 10 || (ip >> 16) == 0xC0A8 ||
-            (ip & 0xFFF00000u) == 0xAC100000u) {
+        if (is_private_ipv4(ip)) {
             snprintf(out, size, "%s", candidate);
             break;
         }
     }
+    freeaddrinfo(list);
+# else
+    struct ifaddrs* interfaces = NULL;
+    if (getifaddrs(&interfaces) != 0) return;
+    for (struct ifaddrs* it = interfaces; it; it = it->ifa_next) {
+        if (!it->ifa_addr || it->ifa_addr->sa_family != AF_INET ||
+            (it->ifa_flags & IFF_LOOPBACK) || !(it->ifa_flags & IFF_UP)) continue;
+        struct sockaddr_in* addr = (struct sockaddr_in*) it->ifa_addr;
+        uint32_t ip = ntohl(addr->sin_addr.s_addr);
+        char candidate[48];
+        if (!inet_ntop(AF_INET, &addr->sin_addr, candidate, (socklen_t) sizeof(candidate))) continue;
+        if (!fallback[0]) snprintf(fallback, sizeof(fallback), "%s", candidate);
+        if (is_private_ipv4(ip)) {
+            snprintf(out, size, "%s", candidate);
+            break;
+        }
+    }
+    freeifaddrs(interfaces);
+# endif
     if (strcmp(out, "No disponible") == 0 && fallback[0])
         snprintf(out, size, "%s", fallback);
-    freeaddrinfo(list);
 }
 
 static int begin_winsock(LanSession* s) {
