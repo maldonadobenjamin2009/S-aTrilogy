@@ -339,7 +339,7 @@ static void close_linked(Emu* primary) {
 	Emu* members[3] = {primary, primary->peer, primary->peer2};
 	int count = link && link->count >= 2 && link->count <= 3 ? link->count : (primary->peer2 ? 3 : (primary->peer ? 2 : 1));
 	if (link) {
-		if (link->lan) lan_disconnect(link->lan);
+		if (link->lan) lan_abort(link->lan);
 		if (link->netMutexReady) {
 			MutexLock(&link->netMutex);
 			link->netStopping = 1;
@@ -353,6 +353,7 @@ static void close_linked(Emu* primary) {
 			if (members[i] && members[i]->threadStarted) mCoreThreadEnd(&members[i]->thread);
 		for (int i = 0; i < count; i++)
 			if (members[i] && members[i]->threadStarted) mCoreThreadJoin(&members[i]->thread);
+		if (link->lan) lan_disconnect(link->lan);
 		for (int i = 0; i < count; i++) {
 			Emu* e = members[i];
 			if (!e || !e->driverAttached || !e->core) continue;
