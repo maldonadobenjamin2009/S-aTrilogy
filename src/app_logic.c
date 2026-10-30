@@ -666,6 +666,7 @@ static int lan_hash_file(uint64_t* hash, const char* path, int required) {
 	if (!f) {
 		if (required || sys_file_exists(path)) return 0;
 		lan_hash_byte(hash, 0);
+		lan_hash_byte(hash, 0xFF);
 		return 1;
 	}
 	lan_hash_byte(hash, 1);
