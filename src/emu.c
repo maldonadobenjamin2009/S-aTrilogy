@@ -556,6 +556,13 @@ void emu_set_keys(Emu* emu, uint32_t keys) {
 
 void emu_run_frame(Emu* emu) {
 	if (!emu || !emu->core) return;
+	if (emu->link && emu->link->lan) {
+		/* Los hilos mGBA avanzan por su propio pacing y esperan en el intercambio
+		 * de entradas LAN. No bloquear el hilo de UI: así el juego puede mostrar
+		 * el estado de espera y el usuario aún puede abandonar con Esc. Las
+		 * capturas de vídeo y audio ya usan sus mutex independientes. */
+		return;
+	}
 	if (emu->link && emu->link->count >= 2) {
 		Emu* members[3] = {emu, emu->peer, emu->peer2};
 		for (int i = 0; i < emu->link->count; i++) {
