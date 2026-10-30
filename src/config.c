@@ -72,11 +72,14 @@ int config_load(Config* c, const char* path) {
 	/* Migración única: versiones anteriores usaban el botón PS/Guide (5) para pausar.
 	 * En mandos DualShock 4/compatibles, el usuario ahora espera el clic del touchpad (20).
 	 * Se hace solo al migrar una configuración antigua; las futuras asignaciones se respetan. */
-	if (version < CONFIG_VERSION) {
+	/* Esta migración de controles se introdujo en la versión 3. No volver a
+	 * aplicarla al subir a v4 por el nuevo campo LAN: respetar asignaciones v3. */
+	if (version < 3) {
 		for (int player = 0; player < 2; player++)
 			if (c->pad[player][ACT_PAUSE] == PAD_PS) c->pad[player][ACT_PAUSE] = PAD_TOUCHPAD;
-		config_save(c, path); /* persiste la migración y el marcador de versión */
 	}
+	if (version < CONFIG_VERSION)
+		config_save(c, path); /* persiste el puerto LAN y el marcador de versión */
 	return 1;
 }
 
