@@ -31,6 +31,8 @@ int lan_join_start(LanSession* session, const char* host_ipv4, unsigned short po
                    const char* password, unsigned game_id, uint64_t rom_signature);
 void lan_poll(LanSession* session);
 void lan_disconnect(LanSession* session);
+/* Interrupt a running frame exchange; final cleanup follows after emulator threads join. */
+void lan_abort(LanSession* session);
 
 int lan_state(const LanSession* session);
 int lan_player_slot(const LanSession* session); /* host = 0, joining player = 1 */
