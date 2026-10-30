@@ -306,7 +306,7 @@ static void derive_room_key(LanSession* s, const uint8_t client_nonce[16], uint8
     hmac_sha1(s->password, password_len, block, sizeof(salt) + 4, u);
     memcpy(t, u, sizeof(t));
     for (unsigned i = 1; i < 60000; ++i) {
-        hmac_sha1((const char*) u, sizeof(u), u, sizeof(u), next);
+        hmac_sha1(s->password, password_len, u, sizeof(u), next);
         memcpy(u, next, sizeof(u));
         for (size_t j = 0; j < sizeof(t); ++j) t[j] ^= u[j];
     }
