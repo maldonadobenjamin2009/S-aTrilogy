@@ -16,6 +16,7 @@
 #include <string.h>
 
 static uint64_t lan_game_signature(const App* a, int game_index);
+static void exit_game(App* a);
 
 const GameInfo GAMES[NUM_GAMES] = {
 	{"sa1", "Sonic Advance", "sonicadvance.gba", "sonicadvance", "2001",
