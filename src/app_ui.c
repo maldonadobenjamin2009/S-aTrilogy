@@ -435,7 +435,7 @@ static void draw_lan_settings(App* a, Canvas* c) {
 			size_t n = strlen(a->lan_password);
 			if (n > 24) n = 24;
 			memset(value, '*', n); value[n] = 0;
-			if (!n) snprintf(value, sizeof(value), "mínimo 4 caracteres");
+			if (!n) snprintf(value, sizeof(value), "mínimo 8 caracteres");
 		} else value[0] = 0;
 		if (k < 3) {
 			if (focused && a->lan_editing) {
@@ -454,7 +454,7 @@ static void draw_lan_settings(App* a, Canvas* c) {
 		snprintf(status, sizeof(status), "Compartí esta IP: %s  ·  Puerto: %d", lan_local_ipv4(a->lan), a->cfg.lan_port);
 		T(c, status, p.x + 50, p.y + p.h - 112, 21, C_GOLD, TX_VMID);
 	} else {
-		snprintf(status, sizeof(status), "Juego seleccionado: %s  ·  Puerto predeterminado: %d", GAMES[a->sel].title, LAN_DEFAULT_PORT);
+		snprintf(status, sizeof(status), "Juego seleccionado: %s  ·  Puerto configurado: %d", GAMES[a->sel].title, a->cfg.lan_port);
 		T(c, status, p.x + 50, p.y + p.h - 112, 19, C_MUTED, TX_VMID);
 	}
 	T(c, "Ambos equipos deben usar el mismo juego, ROM y puerto.", p.x + 50, p.y + p.h - 78, 18, C_MUTED, TX_VMID);
