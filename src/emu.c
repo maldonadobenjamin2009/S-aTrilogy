@@ -27,6 +27,7 @@
 #include <stdio.h>
 
 #include "emu.h"
+#include "lan.h"
 #include "debug_log.h"
 #ifndef EMU_INTERP
 #define EMU_INTERP mINTERPOLATOR_SINC
@@ -67,6 +68,14 @@ struct Emu {
 struct LinkSession {
 	struct GBASIOLockstepCoordinator coordinator;
 	int count; /* 2 o 3 núcleos conectados */
+	Emu* members[3];
+	LanSession* lan;
+	int localSlot;
+	Mutex netMutex;
+	Condition netCondition;
+	int netMutexReady, netConditionReady;
+	uint32_t netFrame;
+	int netArrivals, netFailed, netStopping;
 };
 
 const char* emu_version(void) {
@@ -147,6 +156,39 @@ static void emu_pace_linked_core(Emu* emu) {
 	}
 }
 
+static void linked_lan_frame_sync(Emu* emu) {
+	struct LinkSession* link = emu ? emu->link : NULL;
+	if (!link || !link->lan || link->count != 2 || !link->netMutexReady || !link->netConditionReady) return;
+	MutexLock(&link->netMutex);
+	if (link->netFailed || link->netStopping) { MutexUnlock(&link->netMutex); return; }
+	uint32_t frame = link->netFrame;
+	if (++link->netArrivals < 2) {
+		while (link->netFrame == frame && !link->netFailed && !link->netStopping)
+			ConditionWait(&link->netCondition, &link->netMutex);
+		MutexUnlock(&link->netMutex);
+		return;
+	}
+	MutexUnlock(&link->netMutex);
+
+	uint32_t localKeys = 0, remoteKeys = 0;
+	int ok = lan_exchange_input(link->lan, frame, &localKeys, &remoteKeys);
+	MutexLock(&link->netMutex);
+	if (!ok || link->netStopping) {
+		link->netFailed = 1;
+		localKeys = remoteKeys = 0;
+	}
+	uint32_t keys[2] = {0, 0};
+	keys[link->localSlot] = localKeys;
+	keys[1 - link->localSlot] = remoteKeys;
+	for (int i = 0; i < 2; ++i)
+		if (link->members[i] && link->members[i]->core)
+			link->members[i]->core->setKeys(link->members[i]->core, keys[i]);
+	++link->netFrame;
+	link->netArrivals = 0;
+	ConditionWake(&link->netCondition);
+	MutexUnlock(&link->netMutex);
+}
+
 static void linked_frame_callback(struct mCoreThread* thread) {
 	Emu* emu = thread ? (Emu*) thread->userData : NULL;
 	if (!emu || !emu->core) return;
@@ -172,6 +214,7 @@ static void linked_frame_callback(struct mCoreThread* thread) {
 		mAudioBufferClear(emu->core->getAudioBuffer(emu->core));
 		MutexUnlock(&emu->audioMutex);
 	}
+	linked_lan_frame_sync(emu);
 	emu_pace_linked_core(emu);
 }
 
@@ -296,12 +339,21 @@ static void close_linked(Emu* primary) {
 	Emu* members[3] = {primary, primary->peer, primary->peer2};
 	int count = link && link->count >= 2 && link->count <= 3 ? link->count : (primary->peer2 ? 3 : (primary->peer ? 2 : 1));
 	if (link) {
+		if (link->lan) lan_abort(link->lan);
+		if (link->netMutexReady) {
+			MutexLock(&link->netMutex);
+			link->netStopping = 1;
+			link->netFailed = 1;
+			if (link->netConditionReady) ConditionWake(&link->netCondition);
+			MutexUnlock(&link->netMutex);
+		}
 		/* Detener todos antes de desconectar cualquier driver: otro jugador puede
 		 * estar esperando su confirmación dentro del coordinador de mGBA. */
 		for (int i = 0; i < count; i++)
 			if (members[i] && members[i]->threadStarted) mCoreThreadEnd(&members[i]->thread);
 		for (int i = 0; i < count; i++)
 			if (members[i] && members[i]->threadStarted) mCoreThreadJoin(&members[i]->thread);
+		if (link->lan) lan_disconnect(link->lan);
 		for (int i = 0; i < count; i++) {
 			Emu* e = members[i];
 			if (!e || !e->driverAttached || !e->core) continue;
@@ -310,6 +362,8 @@ static void close_linked(Emu* primary) {
 			e->driverAttached = 0;
 		}
 		GBASIOLockstepCoordinatorDeinit(&link->coordinator);
+		if (link->netConditionReady) ConditionDeinit(&link->netCondition);
+		if (link->netMutexReady) MutexDeinit(&link->netMutex);
 		free(link);
 		for (int i = 0; i < count; i++) {
 			if (!members[i]) continue;
@@ -324,7 +378,8 @@ static void close_linked(Emu* primary) {
 
 static Emu* emu_open_linked(const char* rom_path, const char* const save_paths[3],
                               const char* bios_path, unsigned out_rate, int count,
-                              Emu** secondary_out, Emu** tertiary_out) {
+                              Emu** secondary_out, Emu** tertiary_out,
+                              LanSession* lan, int local_slot) {
 	if (secondary_out) *secondary_out = NULL;
 	if (tertiary_out) *tertiary_out = NULL;
 	if (count < 2 || count > 3) return NULL;
@@ -344,8 +399,26 @@ static Emu* emu_open_linked(const char* rom_path, const char* const save_paths[3
 		for (int i = 0; i < count; i++) emu_close(members[i]);
 		return NULL;
 	}
-	GBASIOLockstepCoordinatorInit(&link->coordinator);
 	link->count = count;
+	link->lan = lan;
+	link->localSlot = local_slot == 1 ? 1 : 0;
+	for (int i = 0; i < count; ++i) link->members[i] = members[i];
+	if (lan) {
+		if (MutexInit(&link->netMutex) != 0) {
+			free(link);
+			for (int i = 0; i < count; ++i) emu_close(members[i]);
+			return NULL;
+		}
+		link->netMutexReady = 1;
+		if (ConditionInit(&link->netCondition) != 0) {
+			MutexDeinit(&link->netMutex);
+			free(link);
+			for (int i = 0; i < count; ++i) emu_close(members[i]);
+			return NULL;
+		}
+		link->netConditionReady = 1;
+	}
+	GBASIOLockstepCoordinatorInit(&link->coordinator);
 	members[0]->peer = members[1];
 	members[0]->peer2 = count == 3 ? members[2] : NULL;
 	for (int i = 0; i < count; i++) {
@@ -395,7 +468,7 @@ Emu* emu_open_linked_pair(const char* rom_path, const char* save_path,
                           const char* save_path2, const char* bios_path,
                           unsigned out_rate, Emu** secondary_out) {
 	const char* saves[3] = {save_path, save_path2, NULL};
-	return emu_open_linked(rom_path, saves, bios_path, out_rate, 2, secondary_out, NULL);
+	return emu_open_linked(rom_path, saves, bios_path, out_rate, 2, secondary_out, NULL, NULL, 0);
 }
 
 Emu* emu_open_linked_trio(const char* rom_path, const char* save_path,
@@ -403,7 +476,16 @@ Emu* emu_open_linked_trio(const char* rom_path, const char* save_path,
                           const char* bios_path, unsigned out_rate,
                           Emu** secondary_out, Emu** tertiary_out) {
 	const char* saves[3] = {save_path, save_path2, save_path3};
-	return emu_open_linked(rom_path, saves, bios_path, out_rate, 3, secondary_out, tertiary_out);
+	return emu_open_linked(rom_path, saves, bios_path, out_rate, 3, secondary_out, tertiary_out, NULL, 0);
+}
+
+Emu* emu_open_linked_pair_lan(const char* rom_path, const char* save_path,
+                              const char* save_path2, const char* bios_path,
+                              unsigned out_rate, LanSession* lan, int local_slot,
+                              Emu** secondary_out) {
+	const char* saves[3] = {save_path, save_path2, NULL};
+	if (!lan || !lan_supported() || local_slot < 0 || local_slot > 1) return NULL;
+	return emu_open_linked(rom_path, saves, bios_path, out_rate, 2, secondary_out, NULL, lan, local_slot);
 }
 
 void emu_close(Emu* emu) {
@@ -434,6 +516,9 @@ void emu_close(Emu* emu) {
 
 void emu_set_paused(Emu* emu, int paused) {
 	if (!emu || !emu->link) return;
+	/* En LAN los callbacks sostienen el intercambio por fotograma; pausar solo
+	 * los hilos locales bloquearía el otro equipo y rompería el lockstep. */
+	if (emu->link->lan) return;
 	Emu* members[3] = {emu, emu->peer, emu->peer2};
 	int count = emu->link->count;
 	if (count < 2 || count > 3) return;
@@ -471,6 +556,13 @@ void emu_set_keys(Emu* emu, uint32_t keys) {
 
 void emu_run_frame(Emu* emu) {
 	if (!emu || !emu->core) return;
+	if (emu->link && emu->link->lan) {
+		/* Los hilos mGBA avanzan por su propio pacing y esperan en el intercambio
+		 * de entradas LAN. No bloquear el hilo de UI: así el juego puede mostrar
+		 * el estado de espera y el usuario aún puede abandonar con Esc. Las
+		 * capturas de vídeo y audio ya usan sus mutex independientes. */
+		return;
+	}
 	if (emu->link && emu->link->count >= 2) {
 		Emu* members[3] = {emu, emu->peer, emu->peer2};
 		for (int i = 0; i < emu->link->count; i++) {

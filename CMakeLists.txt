@@ -59,7 +59,7 @@ target_compile_definitions(emu_core PRIVATE
   HAVE_STRDUP)
 if(WIN32)
   target_compile_definitions(emu_core PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64)
-  target_link_libraries(emu_core PUBLIC ws2_32 shlwapi)
+  target_link_libraries(emu_core PUBLIC ws2_32 shlwapi bcrypt)
 elseif(EMSCRIPTEN)
   # La pareja de mGBA usa pthreads en el navegador. GitHub Pages añade COOP/COEP
   # mediante coi-serviceworker.js para habilitar SharedArrayBuffer en Chrome.
@@ -99,7 +99,7 @@ endif()
 # ---------------------------------------------------------------------------------------
 # Núcleo del launcher (portable): gráficos por software, PNG, interfaz, lógica
 # ---------------------------------------------------------------------------------------
-add_library(launcher_core STATIC src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/app_logic.c src/app_ui.c)
+add_library(launcher_core STATIC src/gfx.c src/png.c src/font_data.c src/sys.c src/config.c src/lan.c src/app_logic.c src/app_ui.c)
 target_include_directories(launcher_core PUBLIC src)
 target_link_libraries(launcher_core PUBLIC emu_core)
 set_target_properties(emu_core launcher_core PROPERTIES POSITION_INDEPENDENT_CODE ON)

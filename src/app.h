@@ -27,9 +27,10 @@ enum {
 	EV_PAD_COUNT,     /* value = número de mandos conectados */
 	EV_TOUCH_DOWN,    /* code = ACT_* de config.h; botón virtual independiente del mapeo físico */
 	EV_TOUCH_UP,
-	EV_TOUCH_VOLUME  /* value = -10 o +10; flechas del volumen en la pausa */
+	EV_TOUCH_VOLUME, /* value = -10 o +10; flechas del volumen en la pausa */
+	EV_TEXT_INPUT   /* text contiene texto introducido por SDL */
 };
-typedef struct { int type, code, value, player; } AppEvent;
+typedef struct { int type, code, value, player; char text[32]; } AppEvent;
 
 typedef struct {
 	void* user;
@@ -38,6 +39,8 @@ typedef struct {
 	void (*set_title)(void* user, const char* title);
 	void (*set_cursor_visible)(void* user, int visible);
 	const char* (*key_name)(void* user, int code);   /* opcional */
+	void (*start_text_input)(void* user);              /* opcional: teclado virtual */
+	void (*stop_text_input)(void* user);
 	int audio_rate;                                   /* frecuencia con la que la plataforma abrió el audio */
 	int has_audio;
 	const char* audio_info;

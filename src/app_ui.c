@@ -33,7 +33,8 @@ Rect ui_btn_rect(int j) {
 	return rect_make(x, 945, w[j], 70);
 }
 static Rect settings_panel(void) { return rect_make(490, 40, 940, 1000); }
-Rect ui_settings_row(int k) { Rect p = settings_panel(); return rect_make(p.x + 40, p.y + 120 + k * 92, p.w - 80, 80); }
+Rect ui_settings_row(int k) { Rect p = settings_panel(); return rect_make(p.x + 40, p.y + 108 + k * 82, p.w - 80, 74); }
+Rect ui_lan_row_rect(int k) { Rect p = settings_panel(); return rect_make(p.x + 40, p.y + 112 + k * 94, p.w - 80, 82); }
 static Rect controls_panel(void) { return rect_make(160, 40, 1600, 1000); }
 Rect ui_ctrl_row_rect(int k) { Rect p = controls_panel(); return rect_make(p.x + 40, p.y + 150 + k * 47, p.w - 80, 43); }
 Rect ui_ctrl_cell_rect(int k, int col) {
@@ -398,10 +399,11 @@ static void draw_settings(App* a, Canvas* c) {
 	for (int k = 0; k < SET_COUNT; k++) {
 		Rect r = ui_settings_row(k);
 		int focused = k == a->set_sel;
-		if (focused) panel(c, r, with_alpha(acc, 95), 16, acc, 3); else panel(c, r, ARGB(18, 255, 255, 255), 16, 0, 0);
-		T(c, SETTINGS[k].label, r.x + 28, r.y + r.h / 2, 28, focused ? C_WHITE : C_SOFT, TX_VMID | (focused ? TX_BOLD : 0));
+		if (focused) panel(c, r, with_alpha(acc, 95), 14, acc, 3); else panel(c, r, ARGB(18, 255, 255, 255), 14, 0, 0);
+		T(c, SETTINGS[k].label, r.x + 28, r.y + r.h / 2, 26, focused ? C_WHITE : C_SOFT, TX_VMID | (focused ? TX_BOLD : 0));
 		if (SETTINGS[k].kind == 0) draw_toggle(c, r, *cfg_field(&a->cfg, SETTINGS[k].field));
 		else if (SETTINGS[k].kind == 1) draw_slider(c, r, a->cfg.volume, C_GOLD);
+		else if (SETTINGS[k].kind == 5) T(c, "ABRIR", r.x + r.w - 34, r.y + r.h / 2, 20, C_GOLD, TX_BOLD | TX_RIGHT | TX_VMID);
 	}
 	char buf[96];
 	snprintf(buf, sizeof(buf), "Motor: mGBA integrado (%s)", emu_version());
@@ -412,6 +414,52 @@ static void draw_settings(App* a, Canvas* c) {
 	T(c, buf, p.x + 50, p.y + p.h - 64, 22, C_GREEN, TX_VMID);
 	Hint h[3] = {{GL_DPAD, "↑ ↓", "Mover"}, {GL_CROSS, "Enter", "Cambiar"}, {GL_CIRCLE, "Esc", "Volver"}};
 	draw_hints(a, c, h, 3, p.x + p.w - 30, p.y + p.h - 50);
+}
+
+static void draw_lan_settings(App* a, Canvas* c) {
+	veil(c, 185);
+	Rect p = settings_panel();
+	uint32_t acc = GAMES[a->sel].accent;
+	panel(c, p, ARGB(250, 14, 17, 32), 28, ARGB(60, 255, 255, 255), 2);
+	T(c, "MULTIJUGADOR LAN", p.x + 50, p.y + 28, 48, C_WHITE, TX_BOLD);
+	const char* labels[7] = {"IP del anfitrión", "Puerto TCP común", "Contraseña de la sala", "Crear sala", "Conectarse a sala", "Desconectar", "Volver"};
+	char value[96];
+	for (int k = 0; k < 7; ++k) {
+		Rect r = ui_lan_row_rect(k);
+		int focused = k == a->lan_sel;
+		panel(c, r, focused ? with_alpha(acc, 95) : ARGB(18, 255, 255, 255), 14, focused ? acc : 0, focused ? 3 : 0);
+		T(c, labels[k], r.x + 24, r.y + r.h / 2, 25, focused ? C_WHITE : C_SOFT, TX_VMID | (focused ? TX_BOLD : 0));
+		if (k == 0) snprintf(value, sizeof(value), "%s", a->lan_ip[0] ? a->lan_ip : "192.168.x.x");
+		else if (k == 1) snprintf(value, sizeof(value), "%s", a->lan_port_text);
+		else if (k == 2) {
+			size_t n = strlen(a->lan_password);
+			if (n > 24) n = 24;
+			memset(value, '*', n); value[n] = 0;
+			if (!n) snprintf(value, sizeof(value), "mínimo 8 caracteres");
+		} else value[0] = 0;
+		if (k < 3) {
+			if (focused && a->lan_editing) {
+				size_t n = strlen(value);
+				if (n + 2 < sizeof(value)) { value[n] = '_'; value[n + 1] = 0; }
+			}
+			T(c, value, r.x + r.w - 28, r.y + r.h / 2, 24, focused ? C_GOLD : C_MUTED, TX_RIGHT | TX_VMID);
+		} else if (k == 3 || k == 4) T(c, "▶", r.x + r.w - 34, r.y + r.h / 2, 28, C_GOLD, TX_CENTER | TX_VMID);
+		else if (k == 5) T(c, "×", r.x + r.w - 34, r.y + r.h / 2, 30, C_RED, TX_CENTER | TX_VMID);
+	}
+	char status[220];
+	snprintf(status, sizeof(status), "Estado: %s", a->lan && lan_state(a->lan) != LAN_IDLE ? lan_status(a->lan) : "Sin conexión LAN");
+	T(c, status, p.x + 50, p.y + p.h - 150, 22,
+	  a->lan && lan_state(a->lan) == LAN_ERROR ? C_RED : C_GREEN, TX_VMID);
+	if (a->lan && lan_state(a->lan) == LAN_WAITING) {
+		snprintf(status, sizeof(status), "Compartí esta IP: %s  ·  Puerto: %d", lan_local_ipv4(a->lan), a->cfg.lan_port);
+		T(c, status, p.x + 50, p.y + p.h - 112, 21, C_GOLD, TX_VMID);
+	} else {
+		snprintf(status, sizeof(status), "Juego seleccionado: %s  ·  Puerto configurado: %d", GAMES[a->sel].title, a->cfg.lan_port);
+		T(c, status, p.x + 50, p.y + p.h - 112, 19, C_MUTED, TX_VMID);
+	}
+	T(c, "Ambos equipos deben tener la misma ROM, BIOS, guardados y puerto.", p.x + 50, p.y + p.h - 78, 18, C_MUTED, TX_VMID);
+	Hint h[3] = {{GL_DPAD, "↑ ↓", "Mover"}, {GL_CROSS, "Enter", a->lan_editing ? "Terminar" : "Editar"}, {GL_CIRCLE, "Esc", "Volver"}};
+	draw_hints(a, c, h, 3, p.x + p.w - 30, p.y + p.h - 36);
 }
 
 static uint32_t cur_accent(const App* a) { return GAMES[a->emu ? a->game_idx : a->sel].accent; }
@@ -614,7 +662,7 @@ void ui_draw(App* a) {
 	draw_detail(a, c);
 	draw_buttons(a, c);
 	draw_toast(a, c, 1050);
-	if (a->state == ST_SETTINGS) { if (a->settings_page) draw_controls(a, c); else draw_settings(a, c); }
+	if (a->state == ST_SETTINGS) { if (a->settings_page == 1) draw_controls(a, c); else if (a->settings_page == 2) draw_lan_settings(a, c); else draw_settings(a, c); }
 	if (a->modal) draw_modal(a, c);
 	if (a->loading) {
 		veil(c, 190);
@@ -651,7 +699,7 @@ void app_render(App* a, AppFrame* out) {
 	cv_clear(c, 0);
 	if (a->state == ST_PAUSE) draw_pause(a, c);
 	else if (a->state == ST_SLOTS) draw_slots(a, c);
-	else if (a->state == ST_SETTINGS) draw_controls(a, c);
+	else if (a->state == ST_SETTINGS) { if (a->settings_page == 2) draw_lan_settings(a, c); else if (a->settings_page == 1) draw_controls(a, c); else draw_settings(a, c); }
 	if (a->modal) draw_modal(a, c);
 	draw_toast(a, c, 62);
 	out->ui = c;

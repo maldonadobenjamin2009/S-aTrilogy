@@ -15,6 +15,9 @@
 #include <math.h>
 #include <string.h>
 
+static uint64_t lan_game_signature(const App* a, int game_index);
+static void exit_game(App* a);
+
 const GameInfo GAMES[NUM_GAMES] = {
 	{"sa1", "Sonic Advance", "sonicadvance.gba", "sonicadvance", "2001",
 	 "El debut de Sonic en una consola Nintendo", "Dimps / Sonic Team", "Sega / THQ", "Plataformas 2D",
@@ -46,7 +49,8 @@ const GameInfo GAMES[NUM_GAMES] = {
 const SettingItem SETTINGS[SET_COUNT] = {
 	{0, "Pantalla completa", 0}, {1, "Volumen", 1}, {0, "Suavizado de imagen", 2},
 	{0, "Escalado entero (píxeles nítidos)", 3}, {0, "Mostrar FPS durante el juego", 4},
-	{2, "Controles…", 0}, {3, "Abrir carpeta de ROMs", 0}, {4, "Volver", 0},
+	{2, "Controles…", 0}, {5, "Multijugador LAN…", 0}, {3, "Abrir carpeta de ROMs", 0},
+	{4, "Volver", 0},
 };
 const char* const PAUSE_LABELS[PAUSE_COUNT] = {
 	"CONTINUAR", "GUARDAR PARTIDA", "CARGAR PARTIDA", "VOLUMEN", "PANTALLA COMPLETA", "CONTROLES", "REINICIAR", "SALIR",
@@ -256,6 +260,7 @@ static void do_slot(App* a, int n) {
 }
 
 static void quick_save(App* a) {
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) { app_toast(a, "Los guardados rápidos están desactivados en LAN para evitar desincronización"); return; }
 	int linked = a->emu2 != NULL;
 	if (linked) emu_set_paused(a->emu, 1);
 	int ok = save_slot(a, a->last_slot);
@@ -264,6 +269,7 @@ static void quick_save(App* a) {
 	else toast_s(a, 2.0, "No se pudo guardar");
 }
 static void quick_load(App* a) {
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) { app_toast(a, "Las cargas rápidas están desactivadas en LAN para evitar desincronización"); return; }
 	char p[PATH_MAX_APP + 16];
 	slot_path(a, a->last_slot, p, sizeof(p));
 	int linked = a->emu2 != NULL;
@@ -367,6 +373,11 @@ static void poll_web_link_launch(App* a) {
 #endif
 
 static void start_game_now(App* a, int i, int players) {
+	int lan_mode = a->lan && lan_state(a->lan) == LAN_CONNECTED;
+	if (lan_mode && (players != 2 || a->lan_game_id != (unsigned) i || lan_game_signature(a, i) != a->lan_session_signature)) {
+		app_toast(a, "La sala LAN requiere el mismo juego, ROM, BIOS y guardados");
+		return;
+	}
 	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24], save3[PATH_MAX_APP + 24];
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
 	if (players < 1) players = 1;
@@ -405,7 +416,8 @@ static void start_game_now(App* a, int i, int players) {
 #endif
 	const char* bios = sys_file_exists(a->bios_file) ? a->bios_file : NULL;
 	unsigned rate = a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u;
-	if (players >= 3) a->emu = emu_open_linked_trio(a->rom_path[i], save, save2, save3, bios, rate, &a->emu2, &a->emu3);
+	if (lan_mode) a->emu = emu_open_linked_pair_lan(a->rom_path[i], save, save2, bios, rate, a->lan, lan_player_slot(a->lan), &a->emu2);
+	else if (players >= 3) a->emu = emu_open_linked_trio(a->rom_path[i], save, save2, save3, bios, rate, &a->emu2, &a->emu3);
 	else if (players == 2) a->emu = emu_open_linked_pair(a->rom_path[i], save, save2, bios, rate, &a->emu2);
 	else a->emu = emu_open(a->rom_path[i], save, bios, rate);
 	if (!a->emu) {
@@ -417,10 +429,27 @@ static void start_game_now(App* a, int i, int players) {
 		return;
 	}
 	activate_game(a, i);
+	if (lan_mode) app_toast(a, "Esperando al otro jugador: ambos deben iniciar el juego");
 }
 
 static void start_game(App* a, int i) {
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
+	if (a->lan) {
+		int net_state = lan_state(a->lan);
+		if (net_state == LAN_WAITING || net_state == LAN_CONNECTING || net_state == LAN_HANDSHAKE) {
+			app_toast(a, "Esperá a que el otro jugador se conecte a la sala");
+			return;
+		}
+		if (net_state == LAN_CONNECTED) {
+			if (a->lan_game_id != (unsigned) i || lan_game_signature(a, i) != a->lan_session_signature) {
+				app_toast(a, "Seleccioná el mismo juego, ROM, BIOS y guardados de la sala");
+				return;
+			}
+			a->prompt_game = i;
+			start_game_now(a, i, 2);
+			return;
+		}
+	}
 	a->modal = 1; a->modal_kind = 1; a->modal_choice = 0; a->prompt_game = i;
 	snprintf(a->modal_title, sizeof(a->modal_title), i == 3 ? "¿CUÁNTOS JUGADORES?" : "¿CÓMO DESEA JUGAR?");
 	if (i == 3) {
@@ -446,6 +475,13 @@ static void resolve_game_mode(App* a, int players) {
 
 static void pause_game(App* a) {
 	if (a->state != ST_GAME) return;
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) {
+		/* No se puede congelar un solo extremo de un lockstep online.
+		 * Esc abandona la sesión completa y avisa al otro equipo mediante TCP. */
+		exit_game(a);
+		app_toast(a, "Saliste de la partida LAN");
+		return;
+	}
 	a->state = ST_PAUSE;
 	a->pause_sel = 0;
 	for (int i = 0; i < PAUSE_COUNT; i++) a->pause_anim[i] = 0;
@@ -616,6 +652,159 @@ static void settings_action(App* a, int act) {
 			if (it->kind == 2) open_controls(a, 0);
 			else if (it->kind == 3) open_folder_roms(a);
 			else if (it->kind == 4) a->state = ST_MAIN;
+			else if (it->kind == 5) {
+				a->settings_page = 2;
+				a->lan_sel = 0;
+				a->lan_editing = 0;
+				snprintf(a->lan_port_text, sizeof(a->lan_port_text), "%d", a->cfg.lan_port);
+			}
+		}
+	}
+}
+
+static void lan_hash_byte(uint64_t* hash, uint8_t byte) {
+	*hash ^= byte;
+	*hash *= UINT64_C(1099511628211);
+}
+
+/* Optional files are part of the deterministic starting state: a missing save
+ * is different from an existing (even empty) save. Required ROM failures abort. */
+static int lan_hash_file(uint64_t* hash, const char* path, int required) {
+	FILE* f = fopen(path, "rb");
+	if (!f) {
+		if (required || sys_file_exists(path)) return 0;
+		lan_hash_byte(hash, 0);
+		lan_hash_byte(hash, 0xFF);
+		return 1;
+	}
+	lan_hash_byte(hash, 1);
+	unsigned char buffer[4096];
+	size_t n;
+	while ((n = fread(buffer, 1, sizeof(buffer), f)) > 0)
+		for (size_t i = 0; i < n; ++i) lan_hash_byte(hash, buffer[i]);
+	int failed = ferror(f);
+	fclose(f);
+	if (failed) return 0;
+	lan_hash_byte(hash, 0xFF); /* separator between ROM, saves and BIOS */
+	return 1;
+}
+
+static uint64_t lan_game_signature(const App* a, int game_index) {
+	if (!a || game_index < 0 || game_index >= NUM_GAMES) return 0;
+	uint64_t hash = UINT64_C(14695981039346656037);
+	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24];
+	if (!lan_hash_file(&hash, a->rom_path[game_index], 1)) return 0;
+	sys_stem(a->rom_path[game_index], stem, sizeof(stem));
+	snprintf(save, sizeof(save), "%s/%s.sav", a->saves_dir, stem);
+	snprintf(save2, sizeof(save2), "%s/%s.p2.sav", a->saves_dir, stem);
+	if (!lan_hash_file(&hash, save, 0) ||
+	    !lan_hash_file(&hash, save2, 0) ||
+	    !lan_hash_file(&hash, a->bios_file, 0)) return 0;
+	return hash ? hash : UINT64_C(1);
+}
+
+static void lan_begin_edit(App* a) {
+	if (a->lan_sel > 2 || !a->host.start_text_input) {
+		if (!a->host.start_text_input) app_toast(a, "Este dispositivo no admite entrada de texto");
+		return;
+	}
+	a->lan_editing = 1;
+	a->host.start_text_input(a->host.user);
+}
+
+static void lan_end_edit(App* a) {
+	if (!a->lan_editing) return;
+	a->lan_editing = 0;
+	if (a->host.stop_text_input) a->host.stop_text_input(a->host.user);
+	if (a->lan_sel == 1) {
+		char* end = NULL;
+		long port = strtol(a->lan_port_text, &end, 10);
+		if (!end || *end || port < 1024 || port > 65535) {
+			snprintf(a->lan_port_text, sizeof(a->lan_port_text), "%d", a->cfg.lan_port);
+			app_toast(a, "El puerto debe estar entre 1024 y 65535");
+		} else {
+			a->cfg.lan_port = (int) port;
+			app_save_config(a);
+		}
+	}
+}
+
+static void lan_text_append(App* a, const char* text) {
+	if (!a->lan_editing || !text) return;
+	char* dst = a->lan_sel == 0 ? a->lan_ip :
+	            (a->lan_sel == 1 ? a->lan_port_text : a->lan_password);
+	size_t max = a->lan_sel == 0 ? sizeof(a->lan_ip) - 1 :
+	             (a->lan_sel == 1 ? sizeof(a->lan_port_text) - 1 : sizeof(a->lan_password) - 1);
+	size_t used = strlen(dst);
+	for (const unsigned char* p = (const unsigned char*) text; *p && used < max; ++p) {
+		unsigned char ch = *p;
+		int allowed = a->lan_sel == 0 ? ((ch >= '0' && ch <= '9') || ch == '.') :
+		              (a->lan_sel == 1 ? (ch >= '0' && ch <= '9') :
+		               (ch >= 32 && ch <= 126));
+		if (allowed) dst[used++] = (char) ch;
+	}
+	dst[used] = 0;
+}
+
+static void lan_text_backspace(App* a) {
+	if (!a->lan_editing) return;
+	char* dst = a->lan_sel == 0 ? a->lan_ip :
+	            (a->lan_sel == 1 ? a->lan_port_text : a->lan_password);
+	size_t n = strlen(dst);
+	if (n) dst[n - 1] = 0;
+}
+
+static void lan_room_start(App* a, int host) {
+	if (!lan_supported()) {
+		app_toast(a, "Multijugador LAN no disponible en esta plataforma");
+		return;
+	}
+	if (!a->rom_found[a->sel]) {
+		app_toast(a, "Falta la ROM: %s", GAMES[a->sel].rom);
+		return;
+	}
+	if (strlen(a->lan_password) < 8) {
+		app_toast(a, "La contraseña debe tener al menos 8 caracteres");
+		return;
+	}
+	uint64_t signature = lan_game_signature(a, a->sel);
+	if (!signature) {
+		app_toast(a, "No se pudo comprobar la ROM seleccionada");
+		return;
+	}
+	unsigned short port = (unsigned short) a->cfg.lan_port;
+	int ok = host
+		? lan_host_start(a->lan, port, a->lan_password, (unsigned) a->sel, signature)
+		: lan_join_start(a->lan, a->lan_ip, port, a->lan_password, (unsigned) a->sel, signature);
+	if (ok) {
+		a->lan_game_id = (unsigned) a->sel;
+		a->lan_session_signature = signature;
+		a->lan_last_state = lan_state(a->lan);
+		if (host) app_toast(a, "Sala abierta · IP %s · puerto %u", lan_local_ipv4(a->lan), (unsigned) port);
+		else app_toast(a, "Conectando a %s:%u…", a->lan_ip, (unsigned) port);
+	} else app_toast(a, "LAN: %s", lan_status(a->lan));
+}
+
+static void lan_menu_action(App* a, int act) {
+	if (a->lan_editing) {
+		if (act == A_ACCEPT || act == A_BACK || act == A_MENU) lan_end_edit(a);
+		return;
+	}
+	if (act == A_UP) a->lan_sel = (a->lan_sel + 6) % 7;
+	else if (act == A_DOWN) a->lan_sel = (a->lan_sel + 1) % 7;
+	else if (act == A_BACK || act == A_MENU) a->settings_page = 0;
+	else if (act == A_ACCEPT) {
+		switch (a->lan_sel) {
+		case 0: case 1: case 2: lan_begin_edit(a); break;
+		case 3: lan_room_start(a, 1); break;
+		case 4: lan_room_start(a, 0); break;
+		case 5:
+			lan_disconnect(a->lan);
+			memset(a->lan_password, 0, sizeof(a->lan_password));
+			a->lan_last_state = LAN_IDLE;
+			app_toast(a, "Desconectado de la sala LAN");
+			break;
+		case 6: a->settings_page = 0; break;
 		}
 	}
 }
@@ -739,7 +928,7 @@ static void dispatch(App* a, int act) {
 		return;
 	}
 	switch (a->state) {
-	case ST_SETTINGS: if (a->settings_page) controls_action(a, act); else settings_action(a, act); break;
+	case ST_SETTINGS: if (a->settings_page == 1) controls_action(a, act); else if (a->settings_page == 2) lan_menu_action(a, act); else settings_action(a, act); break;
 	case ST_PAUSE: pause_action(a, act); break;
 	case ST_SLOTS: slots_action(a, act); break;
 	case ST_MAIN: main_action(a, act); request_launch_check(a); break;
@@ -790,6 +979,11 @@ static int key_action(int k) {
 
 static void on_key_down(App* a, int k, int alt) {
 	set_pad_mode(a, 0);
+	if (a->state == ST_SETTINGS && a->settings_page == 2 && a->lan_editing) {
+		if (k == K_ESCAPE || k == K_RETURN) lan_end_edit(a);
+		else if (k == K_BACKSPACE) lan_text_backspace(a);
+		return;
+	}
 	if (a->capture_kind >= 0) {
 		if (k == K_ESCAPE) a->capture_kind = -1;
 		else if (k == K_DELETE) { assign(a, a->capture_kind, a->capture_act, -1); a->capture_kind = -1; }
@@ -922,14 +1116,15 @@ static void on_pad_axis(App* a, int axis, int value, int player) {
 static void mouse_move(App* a, int x, int y) {
 	if (a->modal || a->state == ST_GAME) return;
 	if (a->state == ST_SETTINGS) {
-		if (a->settings_page) {
+		if (a->settings_page == 1) {
 			for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) {
 				a->ctrl_row = k;
-				if (k < ACT_COUNT) {
-										for (int col = 0; col < 3; col++)
-						if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
-				}
+				if (k < ACT_COUNT) for (int col = 0; col < 3; col++)
+					if (rect_has(ui_ctrl_cell_rect(k, col), x, y)) a->ctrl_col = col;
 			}
+		} else if (a->settings_page == 2) {
+			if (!a->lan_editing)
+				for (int k = 0; k < 7; ++k) if (rect_has(ui_lan_row_rect(k), x, y)) a->lan_sel = k;
 		} else for (int k = 0; k < SET_COUNT; k++) if (rect_has(ui_settings_row(k), x, y)) a->set_sel = k;
 	} else if (a->state == ST_PAUSE) {
 		for (int i = 0; i < PAUSE_COUNT; i++) if (rect_has(ui_pause_rect(i), x, y)) a->pause_sel = i;
@@ -976,7 +1171,8 @@ static void mouse_click(App* a, int x, int y) {
 	int hit = 0;
 	mouse_move(a, x, y);
 	if (a->state == ST_SETTINGS) {
-		if (a->settings_page) { for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) hit = 1; }
+		if (a->settings_page == 1) { for (int k = 0; k < ACT_COUNT + 2; k++) if (rect_has(ui_ctrl_row_rect(k), x, y)) hit = 1; }
+		else if (a->settings_page == 2) { for (int k = 0; k < 7; ++k) if (rect_has(ui_lan_row_rect(k), x, y)) hit = 1; }
 		else for (int k = 0; k < SET_COUNT; k++) if (rect_has(ui_settings_row(k), x, y)) hit = 1;
 	} else if (a->state == ST_PAUSE) { for (int i = 0; i < PAUSE_COUNT; i++) if (rect_has(ui_pause_rect(i), x, y)) hit = 1; }
 	else if (a->state == ST_SLOTS) { for (int n = 0; n < SLOT_COUNT; n++) if (rect_has(ui_slot_rect(n), x, y)) hit = 1; }
@@ -1002,6 +1198,9 @@ void app_event(App* a, const AppEvent* ev) {
 	switch (ev->type) {
 	case EV_QUIT: a->quit = 1; break;
 	case EV_KEY_DOWN: on_key_down(a, ev->code, ev->value); break;
+	case EV_TEXT_INPUT:
+		if (a->state == ST_SETTINGS && a->settings_page == 2) lan_text_append(a, ev->text);
+		break;
 	case EV_KEY_UP:
 		set_del(a->keys_down, &a->nkeys, ev->code);
 		if (key_action(ev->code) >= A_UP && key_action(ev->code) <= A_RIGHT) release_dir(a, key_action(ev->code));
@@ -1043,8 +1242,10 @@ void app_event(App* a, const AppEvent* ev) {
 		if (a->pad_count < 2) { a->p2_npad = a->p2_nstick = 0; a->p2_trig[0] = a->p2_trig[1] = 0; }
 		break;
 	case EV_FOCUS_LOST:
+		if (a->lan_editing) lan_end_edit(a);
 		clear_inputs(a);
-		if (a->state == ST_GAME) pause_game(a);
+		/* En LAN no se congela unilateralmente la simulación al cambiar de ventana. */
+		if (a->state == ST_GAME && !(a->lan && lan_state(a->lan) == LAN_CONNECTED)) pause_game(a);
 		break;
 	case EV_MOUSE_MOVE: set_pad_mode(a, 0); mouse_move(a, ev->code, ev->value); break;
 	case EV_MOUSE_DOWN: set_pad_mode(a, 0); mouse_click(a, ev->code, ev->value); break;
@@ -1056,6 +1257,24 @@ void app_event(App* a, const AppEvent* ev) {
 int app_update(App* a, double dt) {
 	a->now += dt;
 	if (a->quit) return 0;
+	if (a->lan) {
+		int net_state = lan_state(a->lan);
+		if (net_state == LAN_WAITING || net_state == LAN_CONNECTING || net_state == LAN_HANDSHAKE) lan_poll(a->lan);
+		net_state = lan_state(a->lan);
+		if (net_state == LAN_CONNECTED && a->lan_last_state != LAN_CONNECTED) {
+			memset(a->lan_password, 0, sizeof(a->lan_password));
+			app_toast(a, "Conexión LAN lista. Ambos pueden iniciar el juego seleccionado");
+		}
+		if (net_state == LAN_ERROR && a->lan_last_state != LAN_ERROR) {
+			char reason[220];
+			snprintf(reason, sizeof(reason), "LAN: %s", lan_status(a->lan));
+			if (a->state == ST_GAME && a->emu) {
+				exit_game(a);
+				app_modal(a, "Conexión LAN perdida", reason);
+			} else app_toast(a, "%s", reason);
+		}
+		a->lan_last_state = lan_state(a->lan);
+	}
 #if defined(__EMSCRIPTEN__)
 	poll_web_link_launch(a);
 #endif
@@ -1081,9 +1300,13 @@ int app_update(App* a, double dt) {
 	if (a->state != ST_GAME && !a->emu && a->now - a->last_scan > 1.0) app_scan_roms(a);
 
 	if (a->state == ST_GAME && a->emu) {
-		emu_set_keys(a->emu, keymask(a));
-		if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
-		if (a->emu3) emu_set_keys(a->emu3, keymask3(a));
+		if (a->lan && lan_state(a->lan) == LAN_CONNECTED) {
+			lan_set_local_input(a->lan, keymask(a));
+		} else {
+			emu_set_keys(a->emu, keymask(a));
+			if (a->emu2) emu_set_keys(a->emu2, keymask2(a));
+			if (a->emu3) emu_set_keys(a->emu3, keymask3(a));
+		}
 		/* El turbo por frame solo es válido con un núcleo aislado. */
 		a->turbo = !a->emu2 && turbo_active(a);
 		for (int k = 0; k < (a->turbo ? TURBO_FRAMES : 1); k++) {
@@ -1170,6 +1393,9 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	a->web_launch_game = -1;
 #endif
 	if (host) a->host = *host;
+	a->lan = lan_create();
+	if (!a->lan) debug_log_warn("No se pudo reservar el estado de multijugador LAN");
+	a->lan_last_state = LAN_IDLE;
 	snprintf(a->base, sizeof(a->base), "%s", base_dir);
 	/* Los recursos instalados (ROMs/assets) pueden estar en una carpeta de solo lectura.
 	 * Las partidas y ajustes usan user_data_dir cuando la plataforma lo proporciona. */
@@ -1212,6 +1438,7 @@ App* app_create(const char* base_dir, const AppHost* host) {
 	a->ui = cv_new(UI_W, UI_H);
 	if (!a->ui) {
 		debug_log_error("app_create: no hay memoria para el lienzo de UI (%dx%d)", UI_W, UI_H);
+		lan_destroy(a->lan);
 		free(a);
 		return NULL;
 	}
@@ -1238,6 +1465,8 @@ void app_destroy(App* a) {
 #endif
 	if (a->emu) emu_close(a->emu);
 	a->emu = a->emu2 = a->emu3 = NULL;
+	lan_destroy(a->lan);
+	a->lan = NULL;
 	for (int n = 1; n <= SLOT_COUNT; n++) cv_free(a->slot_thumbs[n]);
 	ui_free_assets(a);
 	cv_free(a->ui);

@@ -20,7 +20,7 @@ static App* app;
 static const char* shotdir = NULL;     /* con argumento 2: guarda capturas PNG */
 static char work[512];
 
-static void ev(int type, int code, int value) { AppEvent e = {type, code, value, 0}; app_event(app, &e); }
+static void ev(int type, int code, int value) { AppEvent e = {type, code, value, 0, {0}}; app_event(app, &e); }
 static void key(int k) { ev(EV_KEY_DOWN, k, 0); ev(EV_KEY_UP, k, 0); }
 static void pad(int b) { ev(EV_PAD_DOWN, b, 0); ev(EV_PAD_UP, b, 0); }
 static void step(int n) { for (int i = 0; i < n; i++) app_update(app, 1.0 / 60.0); }
@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
 	key(K_DELETE); CHECK(app->cfg.pad[0][ACT_A] == -1, "Supr borra el mapa del mando J1");
 	app->ctrl_row = 0; app->ctrl_col = 0; key(K_RIGHT); key(K_RIGHT); key(K_RETURN);
 	CHECK(app->capture_kind == 2, "esperando botón del mando J2");
-	AppEvent j2down = {EV_PAD_DOWN, 8, 0, 1}, j2up = {EV_PAD_UP, 8, 0, 1};
+	AppEvent j2down = {EV_PAD_DOWN, 8, 0, 1, {0}}, j2up = {EV_PAD_UP, 8, 0, 1, {0}};
 	app_event(app, &j2down); app_event(app, &j2up);
 	CHECK(app->cfg.pad[1][ACT_A] == 8 && app->cfg.pad[0][ACT_A] == -1,
 	      "asignar J2 no modifica el mapa de J1");
@@ -214,6 +214,7 @@ int main(int argc, char** argv) {
 	/* configuración persistida */
 	Config c2; config_defaults(&c2); config_load(&c2, app->cfg_path);
 	CHECK(c2.keys[ACT_A] == 'x' && c2.volume == app->cfg.volume, "config.txt guardado");
+	CHECK(c2.lan_port == LAN_DEFAULT_PORT, "puerto LAN predeterminado persistido");
 
 	/* ---- mando PS4: el clic del panel táctil abre/cierra la pausa */
 	pad(PAD_TOUCHPAD); CHECK(app->state == ST_GAME, "panel táctil reanuda");

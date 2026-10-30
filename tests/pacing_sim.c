@@ -7,7 +7,7 @@
 
 static void write_rom(const char* path);
 static App* app;
-static void key(int k) { AppEvent e = {EV_KEY_DOWN, k, 0}; app_event(app, &e); e.type = EV_KEY_UP; app_event(app, &e); }
+static void key(int k) { AppEvent e = {EV_KEY_DOWN, k, 0, 0, {0}}; app_event(app, &e); e.type = EV_KEY_UP; app_event(app, &e); }
 
 /* modo 0: por reloj, descartando si la cola pasa de 140 ms (primera versión)
  * modo 1: el audio marca el ritmo (versión anterior)
@@ -18,7 +18,7 @@ static void run(const char* name, int mode, double drift) {
 	double queued = 0, dev_acc = 0, t = 0, next_frame = 0;
 	long underruns = 0, drops = 0, frames = 0; double qmin = 1e9, qmax = 0, qsum = 0; long qn = 0;
 	const double TICK = 0.001;
-	AppEvent e = {EV_KEY_DOWN, K_RETURN, 0};
+	AppEvent e = {EV_KEY_DOWN, K_RETURN, 0, 0, {0}};
 	app_event(app, &e);
 	for (int i = 0; i < 4 && app_debug_state(app) != ST_GAME; i++) app_update(app, 0.016);
 	app_audio_reset_requested(app);
