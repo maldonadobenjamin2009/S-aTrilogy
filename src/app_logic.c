@@ -473,7 +473,13 @@ static void resolve_game_mode(App* a, int players) {
 
 static void pause_game(App* a) {
 	if (a->state != ST_GAME) return;
-	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) { app_toast(a, "La pausa local está desactivada durante una partida LAN"); return; }
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) {
+		/* No se puede congelar un solo extremo de un lockstep online.
+		 * Esc abandona la sesión completa y avisa al otro equipo mediante TCP. */
+		exit_game(a);
+		app_toast(a, "Saliste de la partida LAN");
+		return;
+	}
 	a->state = ST_PAUSE;
 	a->pause_sel = 0;
 	for (int i = 0; i < PAUSE_COUNT; i++) a->pause_anim[i] = 0;
@@ -1236,7 +1242,8 @@ void app_event(App* a, const AppEvent* ev) {
 	case EV_FOCUS_LOST:
 		if (a->lan_editing) lan_end_edit(a);
 		clear_inputs(a);
-		if (a->state == ST_GAME) pause_game(a);
+		/* En LAN no se congela unilateralmente la simulación al cambiar de ventana. */
+		if (a->state == ST_GAME && !(a->lan && lan_state(a->lan) == LAN_CONNECTED)) pause_game(a);
 		break;
 	case EV_MOUSE_MOVE: set_pad_mode(a, 0); mouse_move(a, ev->code, ev->value); break;
 	case EV_MOUSE_DOWN: set_pad_mode(a, 0); mouse_click(a, ev->code, ev->value); break;
