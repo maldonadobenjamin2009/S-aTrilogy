@@ -731,8 +731,8 @@ static void lan_room_start(App* a, int host) {
 		app_toast(a, "Falta la ROM: %s", GAMES[a->sel].rom);
 		return;
 	}
-	if (strlen(a->lan_password) < 4) {
-		app_toast(a, "La contraseña debe tener al menos 4 caracteres");
+	if (strlen(a->lan_password) < 8) {
+		app_toast(a, "La contraseña debe tener al menos 8 caracteres");
 		return;
 	}
 	uint64_t signature = lan_rom_signature(a->rom_path[a->sel]);
