@@ -32,7 +32,7 @@ Los dos dispositivos deben estar en la misma red local y poder comunicarse entre
 
 ## Contraseña y seguridad
 
-La contraseña **no se transmite en texto claro**. La sala usa un desafío con números aleatorios, una derivación PBKDF2-HMAC-SHA1 (60.000 iteraciones) y pruebas HMAC para verificar al jugador y autenticar los paquetes de entrada. También se comprueba el título y la firma de la ROM antes de aceptar la sala.
+La contraseña **no se transmite en texto claro**. La sala usa un desafío con números aleatorios, una derivación PBKDF2-HMAC-SHA1 (60.000 iteraciones) y pruebas HMAC para verificar al jugador y autenticar los paquetes de entrada. También se comprueba el título y una firma combinada de la ROM, el BIOS y los dos archivos de guardado antes de aceptar la sala.
 
 El tráfico de juego **no está cifrado**. Usá esta función solo en una red local de confianza y elegí una contraseña larga que no reutilices en otros servicios. La autenticación de los paquetes evita modificaciones casuales o de terceros que no conozcan la contraseña, pero no sustituye el cifrado de una VPN o de una red segura.
 
