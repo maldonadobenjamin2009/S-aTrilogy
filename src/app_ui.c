@@ -699,7 +699,7 @@ void app_render(App* a, AppFrame* out) {
 	cv_clear(c, 0);
 	if (a->state == ST_PAUSE) draw_pause(a, c);
 	else if (a->state == ST_SLOTS) draw_slots(a, c);
-	else if (a->state == ST_SETTINGS) { if (a->settings_page == 2) draw_lan_settings(a, c); else draw_controls(a, c); }
+	else if (a->state == ST_SETTINGS) { if (a->settings_page == 2) draw_lan_settings(a, c); else if (a->settings_page == 1) draw_controls(a, c); else draw_settings(a, c); }
 	if (a->modal) draw_modal(a, c);
 	draw_toast(a, c, 62);
 	out->ui = c;
