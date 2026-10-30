@@ -257,6 +257,7 @@ static void do_slot(App* a, int n) {
 }
 
 static void quick_save(App* a) {
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) { app_toast(a, "Los guardados rápidos están desactivados en LAN para evitar desincronización"); return; }
 	int linked = a->emu2 != NULL;
 	if (linked) emu_set_paused(a->emu, 1);
 	int ok = save_slot(a, a->last_slot);
@@ -265,6 +266,7 @@ static void quick_save(App* a) {
 	else toast_s(a, 2.0, "No se pudo guardar");
 }
 static void quick_load(App* a) {
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) { app_toast(a, "Las cargas rápidas están desactivadas en LAN para evitar desincronización"); return; }
 	char p[PATH_MAX_APP + 16];
 	slot_path(a, a->last_slot, p, sizeof(p));
 	int linked = a->emu2 != NULL;
@@ -368,6 +370,11 @@ static void poll_web_link_launch(App* a) {
 #endif
 
 static void start_game_now(App* a, int i, int players) {
+	int lan_mode = a->lan && lan_state(a->lan) == LAN_CONNECTED;
+	if (lan_mode && (players != 2 || a->lan_game_id != (unsigned) i || lan_rom_signature(a->rom_path[i]) != a->lan_rom_signature)) {
+		app_toast(a, "La sala LAN requiere el mismo juego y la misma ROM");
+		return;
+	}
 	char stem[128], save[PATH_MAX_APP + 16], save2[PATH_MAX_APP + 24], save3[PATH_MAX_APP + 24];
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
 	if (players < 1) players = 1;
@@ -406,7 +413,8 @@ static void start_game_now(App* a, int i, int players) {
 #endif
 	const char* bios = sys_file_exists(a->bios_file) ? a->bios_file : NULL;
 	unsigned rate = a->host.audio_rate > 0 ? (unsigned) a->host.audio_rate : 48000u;
-	if (players >= 3) a->emu = emu_open_linked_trio(a->rom_path[i], save, save2, save3, bios, rate, &a->emu2, &a->emu3);
+	if (lan_mode) a->emu = emu_open_linked_pair_lan(a->rom_path[i], save, save2, bios, rate, a->lan, lan_player_slot(a->lan), &a->emu2);
+	else if (players >= 3) a->emu = emu_open_linked_trio(a->rom_path[i], save, save2, save3, bios, rate, &a->emu2, &a->emu3);
 	else if (players == 2) a->emu = emu_open_linked_pair(a->rom_path[i], save, save2, bios, rate, &a->emu2);
 	else a->emu = emu_open(a->rom_path[i], save, bios, rate);
 	if (!a->emu) {
@@ -422,6 +430,22 @@ static void start_game_now(App* a, int i, int players) {
 
 static void start_game(App* a, int i) {
 	if (!a->rom_found[i]) { app_toast(a, "Falta la ROM: %s", GAMES[i].rom); return; }
+	if (a->lan) {
+		int net_state = lan_state(a->lan);
+		if (net_state == LAN_WAITING || net_state == LAN_CONNECTING || net_state == LAN_HANDSHAKE) {
+			app_toast(a, "Esperá a que el otro jugador se conecte a la sala");
+			return;
+		}
+		if (net_state == LAN_CONNECTED) {
+			if (a->lan_game_id != (unsigned) i || lan_rom_signature(a->rom_path[i]) != a->lan_rom_signature) {
+				app_toast(a, "Seleccioná el mismo juego y ROM configurados en la sala");
+				return;
+			}
+			a->prompt_game = i;
+			start_game_now(a, i, 2);
+			return;
+		}
+	}
 	a->modal = 1; a->modal_kind = 1; a->modal_choice = 0; a->prompt_game = i;
 	snprintf(a->modal_title, sizeof(a->modal_title), i == 3 ? "¿CUÁNTOS JUGADORES?" : "¿CÓMO DESEA JUGAR?");
 	if (i == 3) {
@@ -447,6 +471,7 @@ static void resolve_game_mode(App* a, int players) {
 
 static void pause_game(App* a) {
 	if (a->state != ST_GAME) return;
+	if (a->lan && lan_state(a->lan) == LAN_CONNECTED) { app_toast(a, "La pausa local está desactivada durante una partida LAN"); return; }
 	a->state = ST_PAUSE;
 	a->pause_sel = 0;
 	for (int i = 0; i < PAUSE_COUNT; i++) a->pause_anim[i] = 0;
@@ -869,7 +894,7 @@ static void dispatch(App* a, int act) {
 		return;
 	}
 	switch (a->state) {
-	case ST_SETTINGS: if (a->settings_page) controls_action(a, act); else settings_action(a, act); break;
+	case ST_SETTINGS: if (a->settings_page == 1) controls_action(a, act); else if (a->settings_page == 2) lan_menu_action(a, act); else settings_action(a, act); break;
 	case ST_PAUSE: pause_action(a, act); break;
 	case ST_SLOTS: slots_action(a, act); break;
 	case ST_MAIN: main_action(a, act); request_launch_check(a); break;
