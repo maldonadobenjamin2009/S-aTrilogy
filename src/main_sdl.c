@@ -570,7 +570,7 @@ static int map_key(SDL_Keycode k) {
 }
 
 static void send_player(App* app, int type, int code, int value, int player) {
-	AppEvent e = {type, code, value, player};
+	AppEvent e = {type, code, value, player, {0}};
 	app_event(app, &e);
 }
 static void send_app_event_j1(App* app, int type, int code, int value) { send_player(app, type, code, value, 0); }
